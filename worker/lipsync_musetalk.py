@@ -3,6 +3,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import time
 
 
@@ -52,7 +53,7 @@ def main():
 
     model_dir = root / 'models' / 'musetalkV15'
     cmd = [
-        'python3', '-m', 'scripts.inference',
+        sys.executable, '-m', 'scripts.inference',
         '--inference_config', str(config),
         '--result_dir', str(results),
         '--unet_model_path', str(model_dir / 'unet.pth'),
