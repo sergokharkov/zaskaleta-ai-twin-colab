@@ -13,8 +13,8 @@ def run(cmd):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--episode-dir', required=True)
-    p.add_argument('--voice', required=True, help='Final narration audio WAV/MP3')
     p.add_argument('--output', required=True)
+    p.add_argument('--voice', default=None, help='Deprecated: scene clips now carry their own synchronized audio')
     args = p.parse_args()
 
     root = Path(args.episode_dir)
@@ -28,29 +28,24 @@ def main():
         if not src.is_file():
             raise FileNotFoundError(f'Missing scene clip: {src}')
         dst = normalized / scene['expected_clip']
-        vf = (
-            'scale=1080:1920:force_original_aspect_ratio=increase,'
-            'crop=1080:1920,setsar=1,fps=30'
-        )
+        vf = 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30'
         run([
-            'ffmpeg','-y','-i',str(src),'-t',str(scene['seconds']),
-            '-vf',vf,'-an','-c:v','libx264','-preset','medium','-crf','20',str(dst)
+            'ffmpeg','-y','-i',str(src),'-vf',vf,
+            '-af','aresample=48000:async=1:first_pts=0',
+            '-c:v','libx264','-preset','medium','-crf','20','-pix_fmt','yuv420p',
+            '-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-movflags','+faststart',str(dst)
         ])
         clips.append(dst)
 
     concat_file = normalized / 'concat.txt'
     concat_file.write_text(''.join(f"file '{c.as_posix()}'\n" for c in clips), encoding='utf-8')
-    silent = normalized / 'silent.mp4'
-    run(['ffmpeg','-y','-f','concat','-safe','0','-i',str(concat_file),'-c','copy',str(silent)])
-
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     run([
-        'ffmpeg','-y','-i',str(silent),'-i',str(args.voice),
-        '-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-b:a','192k',
-        '-shortest','-movflags','+faststart',str(output)
+        'ffmpeg','-y','-f','concat','-safe','0','-i',str(concat_file),
+        '-c:v','copy','-c:a','copy','-movflags','+faststart',str(output)
     ])
-    print(f'✅ Final episode: {output}')
+    print(f'✅ Final synchronized episode: {output}')
 
 
 if __name__ == '__main__':
