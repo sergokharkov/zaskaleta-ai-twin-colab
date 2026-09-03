@@ -3,6 +3,14 @@ import json
 from pathlib import Path
 
 
+def flatten_realism(realism_lock):
+    parts = []
+    for group, rules in (realism_lock or {}).items():
+        if isinstance(rules, list) and rules:
+            parts.append(f"{group}: " + '; '.join(str(x) for x in rules))
+    return ' | '.join(parts)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--plan', required=True)
@@ -10,6 +18,7 @@ def main():
     p.add_argument('--output-dir', required=True)
     p.add_argument('--dialogues', default=None)
     p.add_argument('--outfits', default=None)
+    p.add_argument('--clone-profile', default=None)
     args = p.parse_args()
 
     plan_path = Path(args.plan)
@@ -43,10 +52,18 @@ def main():
                 day['outfit_profile'] = outfit_profile
                 day['outfit'] = profile.get('description', day.get('outfit', ''))
 
+    clone_profile = {}
+    clone_path = Path(args.clone_profile) if args.clone_profile else plan_path.with_name('clone_reference_profile.json')
+    if clone_path.is_file():
+        clone_profile = json.loads(clone_path.read_text(encoding='utf-8'))
+    realism_lock = clone_profile.get('realism_lock', {})
+    realism_text = flatten_realism(realism_lock)
+
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     (out / 'voiceover.txt').write_text(day['voiceover'].strip() + '\n', encoding='utf-8')
+    day['clone_profile'] = clone_profile.get('profile_name')
     (out / 'episode.json').write_text(json.dumps(day, ensure_ascii=False, indent=2), encoding='utf-8')
 
     manifest = {
@@ -61,6 +78,7 @@ def main():
         'format': plan['format'],
         'target_duration_seconds': plan['target_duration_seconds'],
         'identity_rules': plan['identity_rules'],
+        'realism_lock': realism_lock,
         'dialogue_rules': dialogue_rules,
         'dialogue': dialogue_pack,
         'scenes': []
@@ -85,19 +103,21 @@ def main():
             dialogue_instruction = (
                 f" Dialogue scene. Supporting character: {secondary}. Relationship/context: {relationship}. "
                 f"Spoken lines: {lines}. Keep the AI clone as the visual and narrative lead. "
+                f"Use natural reverse-shot coverage when more than one person speaks. "
                 f"When AI_CLONE speaks, frame him clearly enough for accurate lip-sync."
             )
 
         full_prompt = (
-            f"Vertical 9:16 cinematic realistic short-film scene in Germany. "
-            f"Same persistent AI clone identity as MASTER_PHOTOS. Preserve exact face, beard, hairstyle, age, "
-            f"skin tone and natural proportions. No beautification, no identity drift. "
+            f"Vertical 9:16 photorealistic cinematic short-film scene in Germany. "
+            f"Same persistent AI clone identity as MASTER_PHOTOS and behavior references. Preserve exact face, beard, hairstyle, age, "
+            f"skin tone, natural facial asymmetry and body proportions. No beautification, no identity drift. "
             f"City: {day['city']}. Location: {day['location']}. "
             f"Main character outfit is LOCKED for this episode: {outfit_prompt}. "
             f"Do not change clothing, colors, footwear or outer layer between scenes unless the script explicitly requires it. "
-            f"Shot: {s['shot']}. Action: {s['prompt']}. Natural body movement, realistic hands, "
-            f"authentic German environment, cinematic depth of field, natural lighting. "
-            f"Secondary people may appear when the scene requires them; main clone remains central."
+            f"Shot: {s['shot']}. Action: {s['prompt']}. Natural blinking, subtle breathing, micro head movement, "
+            f"realistic shoulder/neck motion, realistic five-finger hands, authentic German environment, cinematic depth of field, motivated natural lighting. "
+            f"Secondary people may appear when the scene requires them; main clone remains central. "
+            f"Realism lock: {realism_text}."
             f"{dialogue_instruction}"
         )
         manifest['scenes'].append({
@@ -131,17 +151,22 @@ def main():
     (out / 'README.txt').write_text(
         f"DAY {day['day']:02d}: {day['title']}\n"
         f"CITY: {day['city']}\nLOCATION: {day['location']}\n"
+        f"CLONE PROFILE: {clone_profile.get('profile_name', 'persistent clone')}\n"
         f"{outfit_note}OUTFIT: {day['outfit']}\n"
         f"{dialogue_note}\n"
+        "REALISM LOCK: ON\n"
         "1) Generate scene_01.mp4 ... scene_08.mp4 using scene_prompts.json.\n"
         "2) Keep the same AI clone identity in every scene.\n"
         "3) Keep the assigned outfit profile visually consistent across the whole episode.\n"
         "4) AI_CLONE lines must use MASTER_VOICE and visible lip-sync.\n"
         "5) Supporting-character lines must use a different voice.\n"
-        "6) Run assemble_daily_episode.py to build the final 9:16 short film.\n",
+        "6) Use behavior-reference videos for natural facial motion, speech rhythm and gesture style; do not copy their low camera angle.\n"
+        "7) Run assemble_daily_episode.py to build the final 9:16 short film.\n",
         encoding='utf-8'
     )
     print(f'✅ Daily episode pack ready: {out}')
+    if realism_lock:
+        print('🎭 Realism lock: ON')
     if outfit_profile:
         print('👕 Outfit profile:', outfit_profile['id'], '—', outfit_profile.get('name_uk'))
     if dialogue_pack:
