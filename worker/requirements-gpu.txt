@@ -1,0 +1,8 @@
+torch>=2.3
+transformers>=4.39,<5
+accelerate>=0.28
+soundfile>=0.12
+huggingface_hub>=0.30
+librosa>=0.11
+numpy<2
+git+https://github.com/myshell-ai/OpenVoice.git
