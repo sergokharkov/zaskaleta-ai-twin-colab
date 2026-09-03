@@ -71,7 +71,7 @@ hf download ByteDance/LatentSync \
   --local-dir "${MUSETALK_ROOT}/models/syncnet" \
   --include "latentsync_syncnet.pt"
 
-gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 \
+"${VENV_DIR}/bin/gdown" 154JgKpzCPW82qINcVieuPH3fZ2e0P812 \
   -O "${MUSETALK_ROOT}/models/face-parse-bisent/79999_iter.pth"
 
 curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
