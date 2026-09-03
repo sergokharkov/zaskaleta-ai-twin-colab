@@ -15,7 +15,12 @@ rm -rf /var/lib/apt/lists/*
 
 step "Python 3.11 environment"
 python3 -m pip install --upgrade pip uv
-python3 -m uv venv --python 3.11 --seed "${VENV_DIR}"
+if [ -x "${VENV_DIR}/bin/python" ]; then
+  echo "Reusing existing venv: ${VENV_DIR}"
+else
+  rm -rf "${VENV_DIR}"
+  python3 -m uv venv --python 3.11 --seed "${VENV_DIR}"
+fi
 PYTHON_BIN="${VENV_DIR}/bin/python"
 export PATH="${VENV_DIR}/bin:${PATH}"
 "${PYTHON_BIN}" -m pip install --upgrade pip setuptools wheel
