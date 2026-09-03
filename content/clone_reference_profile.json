@@ -1,0 +1,72 @@
+{
+  "profile_name": "Zaskaleta Persistent AI Clone",
+  "drive_folder_id": "13Wye5lVZPOcUryXbXhplad_FkxM7lG4a",
+  "drive_folder_url": "https://drive.google.com/drive/folders/13Wye5lVZPOcUryXbXhplad_FkxM7lG4a",
+  "master_voice_filename": "Zaskaleta_AI_Voice_Master.mp3",
+  "master_photo_count": 6,
+  "photo_filenames": [
+    "MVIMG_20260830_144834.jpg",
+    "MVIMG_20260830_144843.jpg",
+    "MVIMG_20260830_144606.jpg",
+    "MVIMG_20260830_144457.jpg",
+    "image-1788277947699.jpg",
+    "image-1788277957517.jpg"
+  ],
+  "behavior_videos": [
+    {"filename":"VID_20260901_175254.mp4","duration_seconds":15.996,"role":["frontal_face","neutral_expression","articulation_reference"],"verified":true},
+    {"filename":"VID_20260901_175350.mp4","duration_seconds":36.525,"role":["frontal_speaking","lip_motion","natural_expression"],"verified":true},
+    {"filename":"VID_20260901_183436.mp4","role":["long_form_behavior_reference"],"verified":false,"note":"File is approximately 826 MB; retain for Colab-side analysis directly from Google Drive."},
+    {"filename":"VID_20260901_184333.mp4","duration_seconds":131.219,"role":["long_form_speech","head_motion","emotion_reference"],"verified":true,"camera_note":"low camera angle; use behavior only, not geometry/identity framing"},
+    {"filename":"VID_20260901_184558.mp4","duration_seconds":119.135,"role":["conversational_delivery","head_motion","emotion_reference"],"verified":true,"camera_note":"low camera angle; use behavior only"},
+    {"filename":"VID_20260901_184810.mp4","duration_seconds":86.286,"role":["conversational_delivery","speech_dynamics","emotion_reference"],"verified":true,"camera_note":"low camera angle; use behavior only"}
+  ],
+  "realism_lock": {
+    "identity": [
+      "preserve exact facial structure and natural asymmetry",
+      "preserve beard shape, density and color",
+      "preserve hairstyle, hairline and age",
+      "preserve eye shape, nose, lips, jaw and skin tone",
+      "no beautification, no rejuvenation, no face reshaping"
+    ],
+    "skin": [
+      "natural pores and skin texture",
+      "no plastic skin",
+      "no excessive smoothing",
+      "physically plausible highlights and shadows"
+    ],
+    "motion": [
+      "natural blinking",
+      "subtle breathing",
+      "micro head movement",
+      "realistic shoulder and neck motion",
+      "natural hand gestures",
+      "avoid robotic repetitive motion"
+    ],
+    "hands": [
+      "five fingers per hand",
+      "anatomically plausible wrists and fingers",
+      "no merged or duplicated fingers",
+      "avoid hands near face during close lip-sync unless required"
+    ],
+    "speech": [
+      "visible speaker must match the active audio",
+      "AI_CLONE always uses MASTER_VOICE",
+      "secondary characters use separate voices",
+      "key motivational lines belong to AI_CLONE",
+      "use reverse-shot for multi-person dialogue when practical"
+    ],
+    "cinematography": [
+      "photorealistic German locations",
+      "35mm-style natural perspective",
+      "realistic depth of field",
+      "natural daylight or motivated practical lighting",
+      "no fantasy look unless explicitly scripted"
+    ],
+    "wardrobe": [
+      "one locked outfit profile per episode",
+      "no random clothing changes between scenes",
+      "realistic fabric texture and folds",
+      "no large accidental logos or text artifacts"
+    ]
+  }
+}
