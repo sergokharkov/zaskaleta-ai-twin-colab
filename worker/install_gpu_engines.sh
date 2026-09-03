@@ -3,21 +3,27 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/content/zaskaleta-ai-twin-colab/worker}"
 MUSETALK_ROOT="${MUSETALK_ROOT:-/content/MuseTalk}"
+VENV_DIR="${VENV_DIR:-/content/ai-twin-py311}"
 
 apt-get update
 apt-get install -y --no-install-recommends ffmpeg git curl
 rm -rf /var/lib/apt/lists/*
 
-python3 -m pip install --upgrade pip
-python3 -m pip install -r "${APP_DIR}/requirements.txt"
-python3 -m pip install -r "${APP_DIR}/requirements-gpu.txt"
+python3 -m pip install --upgrade pip uv
+python3 -m uv venv --python 3.11 --seed "${VENV_DIR}"
+PYTHON_BIN="${VENV_DIR}/bin/python"
+export PATH="${VENV_DIR}/bin:${PATH}"
+
+"${PYTHON_BIN}" -m pip install --upgrade pip setuptools wheel
+"${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements.txt"
+"${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements-gpu.txt"
 
 if [ ! -d "${MUSETALK_ROOT}/.git" ]; then
   git clone --depth 1 https://github.com/TMElyralab/MuseTalk.git "${MUSETALK_ROOT}"
 fi
 
-python3 -m pip install -r "${MUSETALK_ROOT}/requirements.txt"
-python3 -m pip install -U "huggingface_hub[cli]" gdown
+"${PYTHON_BIN}" -m pip install -r "${MUSETALK_ROOT}/requirements.txt"
+"${PYTHON_BIN}" -m pip install -U "huggingface_hub[cli]" gdown
 
 mkdir -p \
   "${MUSETALK_ROOT}/models/musetalkV15" \
@@ -53,4 +59,5 @@ gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 \
 curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
   -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
 
-echo "Zaskaleta AI Twin GPU engines installed."
+"${PYTHON_BIN}" -c "import sys, torch; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available())"
+echo "Zaskaleta AI Twin GPU engines installed with ${PYTHON_BIN}."
