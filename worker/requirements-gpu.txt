@@ -1,7 +1,7 @@
 transformers>=4.39,<5
 accelerate>=0.28
 soundfile>=0.12
-huggingface_hub>=0.30
+huggingface_hub==0.30.2
 librosa>=0.11
 numpy<2
 pydub>=0.25
