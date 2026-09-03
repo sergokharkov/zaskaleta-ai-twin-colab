@@ -11,15 +11,17 @@ def main():
     p.add_argument('--dialogues', default=None)
     args = p.parse_args()
 
-    plan = json.loads(Path(args.plan).read_text(encoding='utf-8'))
+    plan_path = Path(args.plan)
+    plan = json.loads(plan_path.read_text(encoding='utf-8'))
     day = next((d for d in plan['days'] if d['day'] == args.day), None)
     if not day:
         raise SystemExit(f'Day {args.day} not found')
 
     dialogue_pack = None
     dialogue_rules = {}
-    if args.dialogues and Path(args.dialogues).is_file():
-        all_dialogues = json.loads(Path(args.dialogues).read_text(encoding='utf-8'))
+    dialogue_path = Path(args.dialogues) if args.dialogues else plan_path.with_name('dialogue_overrides.json')
+    if dialogue_path.is_file():
+        all_dialogues = json.loads(dialogue_path.read_text(encoding='utf-8'))
         dialogue_rules = all_dialogues.get('rules', {})
         dialogue_pack = all_dialogues.get('days', {}).get(str(args.day))
 
@@ -89,7 +91,6 @@ def main():
 
     (out / 'scene_prompts.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 
-    dialogue_note = ''
     if dialogue_pack:
         dialogue_note = (
             f"\nDIALOGUE EPISODE: YES\nSECONDARY CHARACTER: {dialogue_pack.get('secondary_character')}\n"
