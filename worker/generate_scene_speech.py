@@ -17,13 +17,14 @@ def split_sentences(text: str):
     return [p.strip() for p in parts if p.strip()]
 
 
-def distribute(sentences, count):
-    buckets = ['' for _ in range(count)]
-    if not sentences:
+def distribute(sentences, slots):
+    buckets = {n: '' for n in slots}
+    if not sentences or not slots:
         return buckets
     for i, sentence in enumerate(sentences):
-        idx = min(count - 1, int(i * count / max(1, len(sentences))))
-        buckets[idx] = (buckets[idx] + ' ' + sentence).strip()
+        idx = min(len(slots) - 1, int(i * len(slots) / max(1, len(sentences))))
+        n = slots[idx]
+        buckets[n] = (buckets[n] + ' ' + sentence).strip()
     return buckets
 
 
@@ -32,7 +33,6 @@ def load_models(device):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tts = VitsModel.from_pretrained(model_id).to(device)
     tts.eval()
-
     repo = snapshot_download(repo_id='myshell-ai/OpenVoiceV2', allow_patterns=['converter/*'])
     converter_dir = Path(repo) / 'converter'
     converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device, enable_watermark=False)
@@ -67,16 +67,34 @@ def main():
     manifest = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-
     scenes = manifest['scenes']
-    narration = distribute(split_sentences(episode.get('voiceover', '')), len(scenes))
 
-    # Dialogue scenes override the generic narration for the clone so the visible speech matches the script.
-    scene_texts = []
-    for idx, scene in enumerate(scenes):
-        clone_lines = [x['text'] for x in scene.get('dialogue', []) if x.get('speaker') == 'AI_CLONE']
-        text = ' '.join(clone_lines).strip() if clone_lines else narration[idx]
-        scene_texts.append(text)
+    # Five visible speaking beats; the remaining scenes are cinematic cutaways.
+    preferred = [1, 3, 5, 7, 8]
+    dialogue_secondary = set()
+    dialogue_clone = {}
+    for scene in scenes:
+        n = int(scene['n'])
+        lines = scene.get('dialogue', [])
+        if lines:
+            if any(x.get('speaker') != 'AI_CLONE' for x in lines):
+                dialogue_secondary.add(n)
+            clone_lines = [x['text'] for x in lines if x.get('speaker') == 'AI_CLONE']
+            if clone_lines:
+                dialogue_clone[n] = ' '.join(clone_lines)
+
+    narration_slots = [n for n in preferred if n not in dialogue_secondary and n not in dialogue_clone]
+    narration_by_scene = distribute(split_sentences(episode.get('voiceover', '')), narration_slots)
+
+    scene_texts = {}
+    for scene in scenes:
+        n = int(scene['n'])
+        if n in dialogue_clone:
+            scene_texts[n] = dialogue_clone[n]
+        elif n in narration_by_scene:
+            scene_texts[n] = narration_by_scene[n]
+        else:
+            scene_texts[n] = ''
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer, tts, converter = load_models(device)
@@ -85,19 +103,20 @@ def main():
     target_se = converter.extract_se(str(normalized))
 
     audio_manifest = []
-    for scene, text in zip(scenes, scene_texts):
+    for scene in scenes:
         n = int(scene['n'])
+        text = scene_texts[n]
         if not text:
-            audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': '', 'audio': None})
+            audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': '', 'audio': None, 'talking': False})
             continue
         wav = out / f'scene_{n:02d}_clone.wav'
         synth(text, tokenizer, tts, converter, target_se, out, wav, device)
-        audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': text, 'audio': str(wav)})
-        print(f'✅ Scene {n:02d} clone speech: {text}')
+        audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': text, 'audio': str(wav), 'talking': True})
+        print(f'✅ Scene {n:02d} AI_CLONE: {text}')
 
     normalized.unlink(missing_ok=True)
     (out / 'scene_speech_manifest.json').write_text(json.dumps(audio_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-    print('✅ Scene-by-scene main-character speech ready')
+    print('✅ Speaking beats + cinematic cutaways prepared')
 
 
 if __name__ == '__main__':
