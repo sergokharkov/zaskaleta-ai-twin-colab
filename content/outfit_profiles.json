@@ -1,0 +1,55 @@
+{
+  "series_style": "Urban smart casual / cinematic masculine minimalism",
+  "rules": {
+    "main_character_identity_fixed": true,
+    "no_large_logos": true,
+    "no_random_branding": true,
+    "no_outfit_jump_inside_episode_without_story_reason": true,
+    "fit": "clean regular fit, not oversized",
+    "palette": ["black", "graphite", "navy", "grey", "white", "olive", "beige"],
+    "continuity": "One primary outfit profile per daily episode. Accessories and outer layer may vary only when the story logically requires it."
+  },
+  "profiles": {
+    "URBAN_CASUAL": {
+      "name_uk": "Міський casual",
+      "description": "темна мінімалістична куртка, однотонна футболка, темні джинси або прямі брюки, чисті мінімалістичні кросівки",
+      "best_for": ["Hamburg", "Berlin", "вокзал", "прогулянка", "місто", "набережна"],
+      "prompt": "dark minimalist urban jacket, plain fitted t-shirt, dark straight jeans or trousers, clean minimalist sneakers, modern masculine urban casual, no visible logos"
+    },
+    "SMART_CASUAL": {
+      "name_uk": "Smart casual",
+      "description": "світла або темна однотонна сорочка, темні брюки, легке пальто або структурований casual-піджак без краватки, шкіряні casual shoes",
+      "best_for": ["Frankfurt", "офіс", "ділова зустріч", "кафе", "міський центр"],
+      "prompt": "clean smart-casual shirt, tailored dark trousers, lightweight structured coat or unstructured blazer, no tie, understated leather casual shoes, elegant masculine minimalism"
+    },
+    "SPORT": {
+      "name_uk": "Спортивний",
+      "description": "однотонна спортивна футболка або худі, темні спортивні штани, чисті тренувальні кросівки",
+      "best_for": ["парк", "біг", "спортмайданчик", "тренування", "дисципліна"],
+      "prompt": "minimal dark performance t-shirt or fitted hoodie, dark athletic pants, clean training sneakers, modern athletic look, no visible logos"
+    },
+    "DARK_CINEMATIC": {
+      "name_uk": "Dark cinematic",
+      "description": "чорне або графітове пальто чи темна куртка, темний верх, темні брюки, мінімалістичні черевики",
+      "best_for": ["вечір", "дощ", "драматична сцена", "нічне місто", "емоційний монолог"],
+      "prompt": "black or graphite coat or dark structured jacket, dark monochrome top, dark trousers, minimalist boots, cinematic masculine dark look, no visible logos"
+    },
+    "LIGHT_CALM": {
+      "name_uk": "Світлий спокійний",
+      "description": "бежева, сіра або оливкова легка куртка, світла однотонна футболка чи сорочка, нейтральні брюки, світлі або нейтральні кросівки",
+      "best_for": ["сімейна сцена", "ранок", "парк", "позитивний сюжет", "спокійна розмова"],
+      "prompt": "beige, light grey or olive lightweight jacket, plain light t-shirt or shirt, neutral trousers, clean neutral sneakers, warm approachable masculine look"
+    },
+    "STREET": {
+      "name_uk": "Street style",
+      "description": "чорна коротка куртка, біла або сіра футболка, темні прямі штани, сучасні кросівки",
+      "best_for": ["Berlin", "молодіжний район", "урбаністична сцена", "вуличний діалог"],
+      "prompt": "black cropped urban jacket, plain white or grey t-shirt, dark straight trousers, modern clean sneakers, contemporary German street style, no visible logos"
+    }
+  },
+  "day_assignment": {
+    "1":"URBAN_CASUAL","2":"DARK_CINEMATIC","3":"SPORT","4":"SMART_CASUAL","5":"STREET","6":"LIGHT_CALM","7":"DARK_CINEMATIC","8":"URBAN_CASUAL","9":"DARK_CINEMATIC","10":"DARK_CINEMATIC",
+    "11":"SPORT","12":"LIGHT_CALM","13":"SMART_CASUAL","14":"DARK_CINEMATIC","15":"URBAN_CASUAL","16":"DARK_CINEMATIC","17":"URBAN_CASUAL","18":"SMART_CASUAL","19":"SPORT","20":"DARK_CINEMATIC",
+    "21":"LIGHT_CALM","22":"LIGHT_CALM","23":"STREET","24":"SMART_CASUAL","25":"DARK_CINEMATIC","26":"URBAN_CASUAL","27":"SMART_CASUAL","28":"SMART_CASUAL","29":"LIGHT_CALM","30":"DARK_CINEMATIC"
+  }
+}
