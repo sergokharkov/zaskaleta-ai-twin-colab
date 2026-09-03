@@ -5,9 +5,21 @@
     "key_message_owner": "AI_CLONE",
     "secondary_characters_are_supporting_only": true,
     "dialogue_style": "natural, short, cinematic, Ukrainian",
-    "lip_sync_required_for_all_spoken_closeups": true
+    "lip_sync_required_for_all_spoken_closeups": true,
+    "crowd_dialogue_allowed": true,
+    "crowd_size_guideline": "3-20 people unless a larger public scene is explicitly scripted",
+    "final_strong_line_must_be_spoken_by_main_character": true
   },
   "days": {
+    "4": {
+      "secondary_character": "невелика група молодих працівників, 5–8 людей",
+      "relationship": "аудиторія героя",
+      "dialogues": [
+        {"scene": 5, "speaker": "AUDIENCE_MEMBER", "text": "А якщо мотивації просто немає?"},
+        {"scene": 6, "speaker": "AI_CLONE", "text": "Тоді працює дисципліна. Вона не питає, який у тебе сьогодні настрій."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Поки хтось шукає виправдання, хтось тихо будує собі майбутнє."}
+      ]
+    },
     "6": {
       "secondary_character": "чоловік, знайомий героя",
       "relationship": "друг",
@@ -35,6 +47,15 @@
         {"scene": 8, "speaker": "AI_CLONE", "text": "Страх може йти поруч. Але кермо має бути в твоїх руках."}
       ]
     },
+    "12": {
+      "secondary_character": "група людей у міському сквері, 8–12 слухачів",
+      "relationship": "невелика відкрита аудиторія",
+      "dialogues": [
+        {"scene": 4, "speaker": "AUDIENCE_MEMBER", "text": "Хіба один день справді щось змінює?"},
+        {"scene": 5, "speaker": "AI_CLONE", "text": "Один день — це напрямок. А тридцять таких днів — уже нова людина."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Не недооцінюй маленькі кроки. Саме з них складаються великі зміни."}
+      ]
+    },
     "14": {
       "secondary_character": "старший чоловік 55–65 років",
       "relationship": "випадковий співрозмовник",
@@ -51,6 +72,15 @@
         {"scene": 2, "speaker": "WOMAN", "text": "Подивись, скільки людей уже далеко попереду."},
         {"scene": 3, "speaker": "AI_CLONE", "text": "У них свій маршрут. У мене свій."},
         {"scene": 7, "speaker": "AI_CLONE", "text": "Не порівнюй свій шлях із чужим. Твоє життя не копія."}
+      ]
+    },
+    "18": {
+      "secondary_character": "група колег у коворкінгу, 4–6 людей",
+      "relationship": "робоча команда",
+      "dialogues": [
+        {"scene": 4, "speaker": "COLLEAGUE", "text": "А хто винен, якщо все пішло не за планом?"},
+        {"scene": 5, "speaker": "AI_CLONE", "text": "Питання не в тому, хто винен. Питання — що ми робимо далі."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Відповідальність починається там, де закінчуються виправдання."}
       ]
     },
     "21": {
@@ -80,6 +110,15 @@
         {"scene": 7, "speaker": "AI_CLONE", "text": "Життя не ставиться на паузу, поки ти готуєшся почати."}
       ]
     },
+    "25": {
+      "secondary_character": "невеликий натовп на відкритому майданчику, 10–15 людей",
+      "relationship": "слухачі героя",
+      "dialogues": [
+        {"scene": 5, "speaker": "AUDIENCE_MEMBER", "text": "А якщо люди вважають тебе занадто жорстким?"},
+        {"scene": 6, "speaker": "AI_CLONE", "text": "Можна залишатися добрим і водночас мати межі, через які ніхто не переступить."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "М'яке серце — це сила. Але хребет має бути сталевим."}
+      ]
+    },
     "27": {
       "secondary_character": "чоловік, колега",
       "relationship": "діловий контакт",
@@ -96,6 +135,16 @@
         {"scene": 3, "speaker": "WOMAN", "text": "Ти б хотів стерти якісь важкі моменти з минулого?"},
         {"scene": 4, "speaker": "AI_CLONE", "text": "Ні. Вони боліли, але саме вони багато чому мене навчили."},
         {"scene": 8, "speaker": "AI_CLONE", "text": "Навіть труднощі можуть стати силою, якщо пройти їх і не втратити себе."}
+      ]
+    },
+    "30": {
+      "secondary_character": "невелика мотивована аудиторія, 15–20 людей, чоловіки й жінки",
+      "relationship": "фінальна аудиторія місячної серії",
+      "dialogues": [
+        {"scene": 4, "speaker": "AUDIENCE_MEMBER", "text": "І що тепер? Тридцять днів закінчилися."},
+        {"scene": 5, "speaker": "AI_CLONE", "text": "Закінчився тільки відлік. Робота над собою не має фінальної дати."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Цей місяць не зробив мене ідеальним. Він зробив мене сильнішим."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "І я тільки починаю."}
       ]
     }
   }
