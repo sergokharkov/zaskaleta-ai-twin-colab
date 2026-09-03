@@ -1,6 +1,5 @@
 import argparse
 import json
-import random
 from pathlib import Path
 
 import torch
@@ -8,20 +7,17 @@ from PIL import Image
 from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
 from transformers import CLIPVisionModelWithProjection
 
-
 NEGATIVE = (
-    "different person, identity drift, changed face, deformed face, asymmetrical eyes, "
-    "bad anatomy, deformed hands, extra fingers, missing fingers, duplicate person, "
-    "plastic skin, beauty filter, cartoon, illustration, low quality, blurry, watermark, text"
+    "identity drift, changed face, deformed face, asymmetrical eyes, bad anatomy, deformed hands, "
+    "extra fingers, missing fingers, duplicate person, plastic skin, beauty filter, cartoon, illustration, "
+    "low quality, blurry, watermark, text"
 )
 
 
 def load_pipe():
     dtype = torch.float16
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-        "h94/IP-Adapter",
-        subfolder="models/image_encoder",
-        torch_dtype=dtype,
+        "h94/IP-Adapter", subfolder="models/image_encoder", torch_dtype=dtype
     )
     pipe = StableDiffusionXLPipeline.from_pretrained(
         "stabilityai/stable-diffusion-xl-base-1.0",
@@ -36,7 +32,6 @@ def load_pipe():
         subfolder="sdxl_models",
         weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
     )
-    pipe.set_ip_adapter_scale(0.82)
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
     pipe.enable_attention_slicing()
@@ -45,12 +40,10 @@ def load_pipe():
 
 def open_reference(path: str):
     image = Image.open(path).convert("RGB")
-    # IP-Adapter face variant benefits from a clean portrait reference.
     w, h = image.size
     side = min(w, h)
     left = max(0, (w - side) // 2)
-    top = max(0, int((h - side) * 0.28))
-    top = min(top, h - side)
+    top = max(0, min(h - side, int((h - side) * 0.28)))
     return image.crop((left, top, left + side, top + side)).resize((768, 768))
 
 
@@ -67,22 +60,36 @@ def main():
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     photos = [p for p in args.photos if Path(p).is_file()]
-    if len(photos) < 1:
+    if not photos:
         raise SystemExit("No valid MASTER_PHOTOS")
 
     pipe = load_pipe()
-    rng = random.Random(args.seed)
     results = []
 
     for scene in manifest["scenes"]:
         n = int(scene["n"])
         ref_path = photos[(n - 1) % len(photos)]
         ref = open_reference(ref_path)
+        lines = scene.get("dialogue", [])
+        secondary_only = bool(lines) and all(x.get("speaker") != "AI_CLONE" for x in lines)
+
+        if secondary_only:
+            pipe.set_ip_adapter_scale(0.0)
+            focus = (
+                "This is a reverse-shot focused on the supporting speaker. The AI clone is off-camera or only "
+                "a blurred shoulder in the foreground. The visible speaker must look like the supporting character "
+                "described in the scene, not like the AI clone. "
+            )
+        else:
+            pipe.set_ip_adapter_scale(0.82)
+            focus = (
+                "The persistent AI clone is the clearly visible main subject. Preserve his recognizable facial identity. "
+            )
+
         prompt = (
-            scene["prompt"]
-            + " Photorealistic European cinema still, natural skin texture, realistic beard and hair, "
-              "35mm lens, cinematic composition, authentic clothing fabric, realistic German architecture, "
-              "subtle film grain, high detail, vertical social-video composition."
+            focus + scene["prompt"]
+            + " Photorealistic European cinema still, natural skin texture, 35mm lens, cinematic composition, "
+              "authentic clothing fabric, realistic German environment, subtle film grain, high detail, vertical 9:16."
         )
         generator = torch.Generator(device="cpu").manual_seed(args.seed + n * 101)
         image = pipe(
@@ -97,8 +104,13 @@ def main():
         ).images[0]
         path = out / f"scene_{n:02d}.png"
         image.save(path, quality=96)
-        results.append({"scene": n, "image": str(path), "reference": ref_path})
-        print(f"✅ Scene {n:02d}: {path.name}")
+        results.append({
+            "scene": n,
+            "image": str(path),
+            "reference": None if secondary_only else ref_path,
+            "focus": "SECONDARY" if secondary_only else "AI_CLONE",
+        })
+        print(f"✅ Scene {n:02d}: {path.name} | focus={results[-1]['focus']}")
 
     (out / "keyframes.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print("✅ All cinematic scene keyframes generated")
