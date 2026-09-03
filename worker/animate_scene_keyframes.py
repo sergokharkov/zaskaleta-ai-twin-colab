@@ -1,0 +1,67 @@
+import argparse
+import json
+import math
+import subprocess
+from pathlib import Path
+
+
+def motion_filter(index: int, seconds: float, fps: int = 25):
+    frames = max(1, int(seconds * fps))
+    # Alternate subtle push-in, pull-out and lateral drift to avoid repetitive shots.
+    mode = (index - 1) % 4
+    if mode == 0:
+        z = f"min(zoom+0.0008,1.08)"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    elif mode == 1:
+        z = f"if(eq(on,1),1.08,max(zoom-0.0008,1.0))"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    elif mode == 2:
+        z = "1.035"
+        x = f"(iw-iw/zoom)*(on/{frames})"
+        y = "ih/2-(ih/zoom/2)"
+    else:
+        z = "1.035"
+        x = f"(iw-iw/zoom)*(1-on/{frames})"
+        y = "ih/2-(ih/zoom/2)"
+    return (
+        f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        f"crop=1080:1920,"
+        f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s=1080x1920:fps={fps},"
+        "format=yuv420p"
+    )
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--manifest", required=True)
+    ap.add_argument("--image-dir", required=True)
+    ap.add_argument("--output-dir", required=True)
+    ap.add_argument("--fps", type=int, default=25)
+    args = ap.parse_args()
+
+    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    image_dir = Path(args.image_dir)
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    for scene in manifest["scenes"]:
+        n = int(scene["n"])
+        seconds = float(scene.get("seconds", 8))
+        src = image_dir / f"scene_{n:02d}.png"
+        if not src.is_file():
+            raise FileNotFoundError(src)
+        dest = out / f"scene_{n:02d}_silent.mp4"
+        vf = motion_filter(n, seconds, args.fps)
+        cmd = [
+            "ffmpeg", "-y", "-loop", "1", "-i", str(src), "-t", str(seconds),
+            "-vf", vf, "-r", str(args.fps), "-c:v", "libx264", "-preset", "medium",
+            "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dest),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        print(f"✅ Animated scene {n:02d}: {dest.name}")
+
+
+if __name__ == "__main__":
+    main()
