@@ -44,7 +44,7 @@ fi
 "${PYTHON_BIN}" -m pip install --no-deps -e "${OPENVOICE_ROOT}"
 
 step "Hugging Face tools"
-"${PYTHON_BIN}" -m pip install -U "huggingface_hub[cli]" gdown
+"${PYTHON_BIN}" -m pip install --upgrade "huggingface_hub[cli]==0.30.2" gdown
 
 step "MuseTalk model folders"
 mkdir -p \
@@ -83,5 +83,5 @@ curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
   -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
 
 step "Sanity check"
-"${PYTHON_BIN}" -c "import sys, torch, openvoice, transformers; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('Transformers:', transformers.__version__)"
+"${PYTHON_BIN}" -c "import sys, torch, openvoice, transformers, huggingface_hub; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__)"
 echo "Zaskaleta AI Twin GPU engines installed with ${PYTHON_BIN}."
