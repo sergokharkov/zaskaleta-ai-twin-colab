@@ -1,0 +1,102 @@
+{
+  "rules": {
+    "main_character": "AI_CLONE",
+    "main_character_voice": "MASTER_VOICE",
+    "key_message_owner": "AI_CLONE",
+    "secondary_characters_are_supporting_only": true,
+    "dialogue_style": "natural, short, cinematic, Ukrainian",
+    "lip_sync_required_for_all_spoken_closeups": true
+  },
+  "days": {
+    "6": {
+      "secondary_character": "чоловік, знайомий героя",
+      "relationship": "друг",
+      "dialogues": [
+        {"scene": 3, "speaker": "FRIEND", "text": "Ти справді думаєш, що варто починати все спочатку?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Я не думаю. Я вже вирішив."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Іноді нове життя починається з одного чесного рішення."}
+      ]
+    },
+    "8": {
+      "secondary_character": "жінка 30–40 років, природна зовнішність, smart casual",
+      "relationship": "знайома",
+      "dialogues": [
+        {"scene": 2, "speaker": "WOMAN", "text": "А якщо ти знову помилишся?"},
+        {"scene": 3, "speaker": "AI_CLONE", "text": "Тоді виправлю помилку. Але не зупинюсь."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Страх помилки не повинен бути сильнішим за бажання жити."}
+      ]
+    },
+    "10": {
+      "secondary_character": "жінка 25–35 років, casual coat, природний вигляд",
+      "relationship": "співрозмовниця",
+      "dialogues": [
+        {"scene": 3, "speaker": "WOMAN", "text": "Тобі ніколи не страшно?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Страшно. Просто я більше не дозволяю страху вирішувати за мене."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Страх може йти поруч. Але кермо має бути в твоїх руках."}
+      ]
+    },
+    "14": {
+      "secondary_character": "старший чоловік 55–65 років",
+      "relationship": "випадковий співрозмовник",
+      "dialogues": [
+        {"scene": 3, "speaker": "MAN", "text": "Знаєш, що найважче зберегти, коли все валиться?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Себе."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Можна втратити багато. Але не можна втрачати власну гідність."}
+      ]
+    },
+    "17": {
+      "secondary_character": "жінка 30–40 років, міський casual",
+      "relationship": "знайома",
+      "dialogues": [
+        {"scene": 2, "speaker": "WOMAN", "text": "Подивись, скільки людей уже далеко попереду."},
+        {"scene": 3, "speaker": "AI_CLONE", "text": "У них свій маршрут. У мене свій."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Не порівнюй свій шлях із чужим. Твоє життя не копія."}
+      ]
+    },
+    "21": {
+      "secondary_character": "чоловік, друг героя",
+      "relationship": "друг, якому потрібна підтримка",
+      "dialogues": [
+        {"scene": 2, "speaker": "FRIEND", "text": "У мене вже немає сил."},
+        {"scene": 3, "speaker": "AI_CLONE", "text": "Тоді сьогодні я пройду цей шматок дороги поруч із тобою."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Сильна людина не тисне на інших. Вона допомагає їм піднятися."}
+      ]
+    },
+    "22": {
+      "secondary_character": "жінка 28–38 років, нейтральний casual",
+      "relationship": "близька знайома",
+      "dialogues": [
+        {"scene": 3, "speaker": "WOMAN", "text": "А якщо в тебе вже ніхто не вірить?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Тоді саме час згадати, що моя віра в себе теж має значення."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Якщо світ перестав у тебе вірити — це ще не причина, щоб ти перестав."}
+      ]
+    },
+    "24": {
+      "secondary_character": "жінка 25–35 років, кафе, modern casual",
+      "relationship": "знайома",
+      "dialogues": [
+        {"scene": 2, "speaker": "WOMAN", "text": "Може, зробимо це потім?"},
+        {"scene": 3, "speaker": "AI_CLONE", "text": "Саме це «потім» і забирає у людей роки."},
+        {"scene": 7, "speaker": "AI_CLONE", "text": "Життя не ставиться на паузу, поки ти готуєшся почати."}
+      ]
+    },
+    "27": {
+      "secondary_character": "чоловік, колега",
+      "relationship": "діловий контакт",
+      "dialogues": [
+        {"scene": 3, "speaker": "COLLEAGUE", "text": "Ти точно виконаєш те, що пообіцяв?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Якщо сказав — зроблю."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Людину визначають не обіцянки. Її визначає те, чи можна на неї спертися."}
+      ]
+    },
+    "29": {
+      "secondary_character": "жінка 30–40 років, теплий casual",
+      "relationship": "близька людина",
+      "dialogues": [
+        {"scene": 3, "speaker": "WOMAN", "text": "Ти б хотів стерти якісь важкі моменти з минулого?"},
+        {"scene": 4, "speaker": "AI_CLONE", "text": "Ні. Вони боліли, але саме вони багато чому мене навчили."},
+        {"scene": 8, "speaker": "AI_CLONE", "text": "Навіть труднощі можуть стати силою, якщо пройти їх і не втратити себе."}
+      ]
+    }
+  }
+}
