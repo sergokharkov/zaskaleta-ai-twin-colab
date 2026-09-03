@@ -9,6 +9,7 @@ def main():
     p.add_argument('--day', type=int, required=True)
     p.add_argument('--output-dir', required=True)
     p.add_argument('--dialogues', default=None)
+    p.add_argument('--outfits', default=None)
     args = p.parse_args()
 
     plan_path = Path(args.plan)
@@ -16,6 +17,7 @@ def main():
     day = next((d for d in plan['days'] if d['day'] == args.day), None)
     if not day:
         raise SystemExit(f'Day {args.day} not found')
+    day = dict(day)
 
     dialogue_pack = None
     dialogue_rules = {}
@@ -24,10 +26,22 @@ def main():
         all_dialogues = json.loads(dialogue_path.read_text(encoding='utf-8'))
         dialogue_rules = all_dialogues.get('rules', {})
         dialogue_pack = all_dialogues.get('days', {}).get(str(args.day))
-
     if dialogue_pack:
-        day = dict(day)
         day['dialogue'] = dialogue_pack
+
+    outfit_profile = None
+    outfit_rules = {}
+    outfit_path = Path(args.outfits) if args.outfits else plan_path.with_name('outfit_profiles.json')
+    if outfit_path.is_file():
+        outfits = json.loads(outfit_path.read_text(encoding='utf-8'))
+        outfit_rules = outfits.get('rules', {})
+        profile_id = outfits.get('day_assignment', {}).get(str(args.day))
+        if profile_id:
+            profile = outfits.get('profiles', {}).get(profile_id)
+            if profile:
+                outfit_profile = {'id': profile_id, **profile}
+                day['outfit_profile'] = outfit_profile
+                day['outfit'] = profile.get('description', day.get('outfit', ''))
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -42,6 +56,8 @@ def main():
         'city': day['city'],
         'location': day['location'],
         'outfit': day['outfit'],
+        'outfit_profile': outfit_profile,
+        'outfit_rules': outfit_rules,
         'format': plan['format'],
         'target_duration_seconds': plan['target_duration_seconds'],
         'identity_rules': plan['identity_rules'],
@@ -54,6 +70,8 @@ def main():
     if dialogue_pack:
         for line in dialogue_pack.get('dialogues', []):
             dialogue_by_scene.setdefault(line['scene'], []).append(line)
+
+    outfit_prompt = outfit_profile.get('prompt', day['outfit']) if outfit_profile else day['outfit']
 
     for s in day['scenes']:
         scene_dialogue = dialogue_by_scene.get(s['n'], [])
@@ -74,7 +92,9 @@ def main():
             f"Vertical 9:16 cinematic realistic short-film scene in Germany. "
             f"Same persistent AI clone identity as MASTER_PHOTOS. Preserve exact face, beard, hairstyle, age, "
             f"skin tone and natural proportions. No beautification, no identity drift. "
-            f"City: {day['city']}. Location: {day['location']}. Outfit: {day['outfit']}. "
+            f"City: {day['city']}. Location: {day['location']}. "
+            f"Main character outfit is LOCKED for this episode: {outfit_prompt}. "
+            f"Do not change clothing, colors, footwear or outer layer between scenes unless the script explicitly requires it. "
             f"Shot: {s['shot']}. Action: {s['prompt']}. Natural body movement, realistic hands, "
             f"authentic German environment, cinematic depth of field, natural lighting. "
             f"Secondary people may appear when the scene requires them; main clone remains central."
@@ -86,6 +106,7 @@ def main():
             'shot': s['shot'],
             'prompt': full_prompt,
             'dialogue': scene_dialogue,
+            'outfit_profile_id': outfit_profile['id'] if outfit_profile else None,
             'expected_clip': f"scene_{s['n']:02d}.mp4"
         })
 
@@ -100,18 +121,29 @@ def main():
     else:
         dialogue_note = "\nDIALOGUE EPISODE: NO\n"
 
+    outfit_note = ''
+    if outfit_profile:
+        outfit_note = (
+            f"OUTFIT PROFILE: {outfit_profile['id']} — {outfit_profile.get('name_uk')}\n"
+            f"OUTFIT LOCK: {outfit_profile.get('description')}\n"
+        )
+
     (out / 'README.txt').write_text(
         f"DAY {day['day']:02d}: {day['title']}\n"
-        f"CITY: {day['city']}\nLOCATION: {day['location']}\nOUTFIT: {day['outfit']}\n"
+        f"CITY: {day['city']}\nLOCATION: {day['location']}\n"
+        f"{outfit_note}OUTFIT: {day['outfit']}\n"
         f"{dialogue_note}\n"
         "1) Generate scene_01.mp4 ... scene_08.mp4 using scene_prompts.json.\n"
         "2) Keep the same AI clone identity in every scene.\n"
-        "3) AI_CLONE lines must use MASTER_VOICE and visible lip-sync.\n"
-        "4) Supporting-character lines must use a different voice.\n"
-        "5) Run assemble_daily_episode.py to build the final 9:16 short film.\n",
+        "3) Keep the assigned outfit profile visually consistent across the whole episode.\n"
+        "4) AI_CLONE lines must use MASTER_VOICE and visible lip-sync.\n"
+        "5) Supporting-character lines must use a different voice.\n"
+        "6) Run assemble_daily_episode.py to build the final 9:16 short film.\n",
         encoding='utf-8'
     )
     print(f'✅ Daily episode pack ready: {out}')
+    if outfit_profile:
+        print('👕 Outfit profile:', outfit_profile['id'], '—', outfit_profile.get('name_uk'))
     if dialogue_pack:
         print('🗣️ Dialogue episode:', dialogue_pack.get('secondary_character'))
 
