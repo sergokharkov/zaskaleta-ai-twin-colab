@@ -35,7 +35,7 @@ def load_models(device):
     tts.eval()
     repo = snapshot_download(repo_id='myshell-ai/OpenVoiceV2', allow_patterns=['converter/*'])
     converter_dir = Path(repo) / 'converter'
-    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device, enable_watermark=False)
+    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device)
     converter.load_ckpt(str(converter_dir / 'checkpoint.pth'))
     return tokenizer, tts, converter
 
@@ -69,7 +69,6 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     scenes = manifest['scenes']
 
-    # Five visible speaking beats; the remaining scenes are cinematic cutaways.
     preferred = [1, 3, 5, 7, 8]
     dialogue_secondary = set()
     dialogue_clone = {}
