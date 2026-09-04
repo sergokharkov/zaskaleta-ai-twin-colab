@@ -86,19 +86,24 @@ def main():
         image = keyframes / f'scene_{n:02d}.png'
         silent = animated / f'scene_{n:02d}_silent.mp4'
         scene_dialogue = dialogue_by_scene.get(n, [])
+        speech_row = speech.get(n, {})
 
         chosen_audio = None
+        force_talking = False
         if scene_dialogue:
             parts = [dialogue_dir / x['audio'] for x in scene_dialogue if (dialogue_dir / x['audio']).is_file()]
             if parts:
                 chosen_audio = out / f'_scene_{n:02d}_dialogue.wav'
                 concat_audio(parts, chosen_audio)
-        elif speech.get(n, {}).get('audio'):
-            p = Path(speech[n]['audio'])
+                force_talking = True
+        elif speech_row.get('audio'):
+            p = Path(speech_row['audio'])
             if p.is_file():
                 chosen_audio = p
 
-        if chosen_audio and (silent.is_file() or image.is_file()):
+        talking = force_talking or bool(speech_row.get('talking', False))
+
+        if chosen_audio and talking and (silent.is_file() or image.is_file()):
             raw = out / f'_scene_{n:02d}_talk_raw.mp4'
             cmd = [
                 args.python_bin, str(worker / 'lipsync_musetalk.py'),
@@ -108,8 +113,6 @@ def main():
                 cmd += ['--reference-video', str(silent)]
             run(cmd)
             duration = max(float(scene.get('seconds', 8)), probe_duration(chosen_audio) + 0.4)
-            # veryfast materially reduces CPU re-encode time while keeping the same
-            # 1080x1920 delivery resolution and CRF quality target.
             run([
                 'ffmpeg','-y','-i',str(raw),
                 '-vf',f'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,tpad=stop_mode=clone:stop_duration={duration}',
@@ -117,7 +120,20 @@ def main():
                 '-c:v','libx264','-preset','veryfast','-crf','19','-c:a','aac','-b:a','192k','-movflags','+faststart',str(target)
             ])
             raw.unlink(missing_ok=True)
-            print(f'🗣️ Scene {n:02d}: lip-sync render from animated reference')
+            print(f'🗣️ Scene {n:02d}: lip-sync render')
+
+        elif chosen_audio and silent.is_file():
+            # Fast path: keep cinematic motion and add the main character as voiceover.
+            # No MuseTalk pass is needed, so this scene renders much faster.
+            duration = max(float(scene.get('seconds', 8)), probe_duration(chosen_audio) + 0.25)
+            run([
+                'ffmpeg','-y','-i',str(silent),'-i',str(chosen_audio),
+                '-map','0:v:0','-map','1:a:0','-t',str(duration),
+                '-c:v','copy','-c:a','aac','-b:a','192k','-af',f'apad=pad_dur={duration}',
+                '-shortest','-movflags','+faststart',str(target)
+            ])
+            print(f'🎙️ Scene {n:02d}: cinematic voiceover — fast path')
+
         else:
             if not silent.is_file():
                 raise FileNotFoundError(silent)
