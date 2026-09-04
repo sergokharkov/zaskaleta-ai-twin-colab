@@ -3,11 +3,42 @@ import json
 from pathlib import Path
 
 
+def candidate_roots(root: Path):
+    roots = [root]
+    drive_root = root.parent
+    shortcuts = drive_root / '.shortcut-targets-by-id'
+    if shortcuts.is_dir():
+        roots.append(shortcuts)
+    return roots
+
+
 def find_unique(root: Path, filename: str):
-    matches = list(root.rglob(filename))
-    if not matches:
-        return None
-    return matches[0]
+    for search_root in candidate_roots(root):
+        matches = list(search_root.rglob(filename))
+        if matches:
+            return matches[0]
+    return None
+
+
+def find_voice(root: Path, preferred_name: str):
+    exact = find_unique(root, preferred_name)
+    if exact:
+        return exact
+
+    preferred = Path(preferred_name)
+    stem = preferred.stem.casefold()
+    allowed = {'.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg'}
+    for search_root in candidate_roots(root):
+        try:
+            for p in search_root.rglob('*'):
+                if not p.is_file() or p.suffix.casefold() not in allowed:
+                    continue
+                pstem = p.stem.casefold()
+                if pstem == stem or ('zaskaleta' in pstem and 'voice' in pstem and 'master' in pstem):
+                    return p
+        except OSError:
+            continue
+    return None
 
 
 def main():
@@ -19,9 +50,13 @@ def main():
 
     root = Path(args.mydrive)
     profile = json.loads(Path(args.profile).read_text(encoding='utf-8'))
-    voice = find_unique(root, profile['master_voice_filename'])
+    voice = find_voice(root, profile['master_voice_filename'])
     if voice is None:
-        raise SystemExit(f"Master voice not found under {root}: {profile['master_voice_filename']}")
+        raise SystemExit(
+            f"Master voice not found under {root}: {profile['master_voice_filename']}\n"
+            "The mounted Google Drive likely does not contain the AI Twin source assets. "
+            "Reconnect the PRIMARY Drive account, then retry."
+        )
 
     base = voice.parent
     photos = []
