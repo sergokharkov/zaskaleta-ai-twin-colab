@@ -8,7 +8,9 @@ from pathlib import Path
 def run(cmd):
     r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(((r.stdout or '') + '\n' + (r.stderr or ''))[-6000:])
+        raise RuntimeError(((r.stdout or '') + '\n' + (r.stderr or ''))[-8000:])
+    if r.stdout:
+        print(r.stdout[-3000:])
 
 
 def probe_duration(path: Path):
@@ -82,6 +84,7 @@ def main():
             continue
 
         image = keyframes / f'scene_{n:02d}.png'
+        silent = animated / f'scene_{n:02d}_silent.mp4'
         scene_dialogue = dialogue_by_scene.get(n, [])
 
         chosen_audio = None
@@ -95,12 +98,17 @@ def main():
             if p.is_file():
                 chosen_audio = p
 
-        if chosen_audio and image.is_file():
+        if chosen_audio and (silent.is_file() or image.is_file()):
             raw = out / f'_scene_{n:02d}_talk_raw.mp4'
-            run([
+            cmd = [
                 args.python_bin, str(worker / 'lipsync_musetalk.py'),
                 '--photo', str(image), '--audio', str(chosen_audio), '--output', str(raw)
-            ])
+            ]
+            # Prefer the already animated scene as MuseTalk input. This preserves motion
+            # and avoids MuseTalk's fragile single-image cleanup path.
+            if silent.is_file():
+                cmd += ['--reference-video', str(silent)]
+            run(cmd)
             duration = max(float(scene.get('seconds', 8)), probe_duration(chosen_audio) + 0.4)
             run([
                 'ffmpeg','-y','-i',str(raw),
@@ -109,9 +117,8 @@ def main():
                 '-c:v','libx264','-preset','medium','-crf','19','-c:a','aac','-b:a','192k','-movflags','+faststart',str(target)
             ])
             raw.unlink(missing_ok=True)
-            print(f'🗣️ Scene {n:02d}: lip-sync render')
+            print(f'🗣️ Scene {n:02d}: lip-sync render from animated reference')
         else:
-            silent = animated / f'scene_{n:02d}_silent.mp4'
             if not silent.is_file():
                 raise FileNotFoundError(silent)
             duration = float(scene.get('seconds', 8))
