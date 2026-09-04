@@ -40,7 +40,6 @@ def clone_tone(base_audio: pathlib.Path, reference_audio: pathlib.Path, output_p
     converter = ToneColorConverter(
         str(converter_dir / "config.json"),
         device=device,
-        enable_watermark=False,
     )
     converter.load_ckpt(str(converter_dir / "checkpoint.pth"))
     src_se = converter.extract_se(str(base_audio))
