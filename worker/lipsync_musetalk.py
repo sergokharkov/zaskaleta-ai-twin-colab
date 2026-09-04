@@ -46,7 +46,7 @@ def main():
     audio = pathlib.Path(args.audio).resolve()
     output = pathlib.Path(args.output).resolve()
     job = output.parent
-    config = job / 'musetalk-task.yaml'
+    config = job / f'musetalk-task-{output.stem}.yaml'
     results = job / 'musetalk-results'
     results.mkdir(parents=True, exist_ok=True)
     write_config(config, media, audio)
@@ -58,18 +58,23 @@ def main():
         '--result_dir', str(results),
         '--unet_model_path', str(model_dir / 'unet.pth'),
         '--unet_config', str(model_dir / 'musetalk.json'),
+        '--whisper_dir', str(root / 'models' / 'whisper'),
         '--version', 'v15',
+        '--use_float16',
+        '--batch_size', '4',
     ]
     started = time.time()
     result = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=3600)
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or 'MuseTalk inference failed')[-3000:])
+        raise RuntimeError((result.stderr or result.stdout or 'MuseTalk inference failed')[-6000:])
 
     rendered = newest_mp4(results, started)
     if not rendered:
-        raise RuntimeError('MuseTalk finished but no MP4 was produced')
+        tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-6000:]
+        raise RuntimeError('MuseTalk finished but no MP4 was produced. Log tail:\n' + tail)
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(rendered, output)
+    print(f'✅ MuseTalk output: {output}')
 
 
 if __name__ == '__main__':
