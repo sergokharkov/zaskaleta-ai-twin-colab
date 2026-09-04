@@ -2,6 +2,7 @@ import argparse
 import gc
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -17,24 +18,37 @@ NEGATIVE = (
 )
 
 # Colab/mobile connections can briefly interrupt large Hugging Face downloads.
-# Give the hub more time and let it resume/retry instead of killing the whole episode.
-os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "180")
-os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
+# Give the hub more time and disable Xet so ordinary resumable HTTP downloads are used.
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "240")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "90")
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+HF_CACHE = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
 
 
-def _retry_load(label, fn, attempts=4):
+def _clear_repo_cache(repo_id: str):
+    repo_dir = HF_CACHE / ("models--" + repo_id.replace("/", "--"))
+    if repo_dir.exists():
+        print(f"🧹 Clearing damaged Hugging Face cache: {repo_dir.name}")
+        shutil.rmtree(repo_dir, ignore_errors=True)
+
+
+def _retry_load(label, fn, repo_id=None, attempts=5):
     last = None
     for attempt in range(1, attempts + 1):
         try:
             return fn()
         except (OSError, ConnectionError, TimeoutError) as e:
             last = e
+            text = str(e).lower()
+            if repo_id and ("consistency check failed" in text or "file should be of size" in text):
+                _clear_repo_cache(repo_id)
             if attempt >= attempts:
                 raise
-            wait = 8 * attempt
+            wait = min(12 * attempt, 45)
             print(f"⚠️ {label}: transient download/cache error ({attempt}/{attempts}); retry in {wait}s")
-            print(f"   {type(e).__name__}: {str(e)[:220]}")
+            print(f"   {type(e).__name__}: {str(e)[:260]}")
             time.sleep(wait)
     raise last
 
@@ -46,6 +60,7 @@ def load_pipe():
         lambda: CLIPVisionModelWithProjection.from_pretrained(
             "h94/IP-Adapter", subfolder="models/image_encoder", torch_dtype=dtype
         ),
+        repo_id="h94/IP-Adapter",
     )
     pipe = _retry_load(
         "SDXL base model",
@@ -56,6 +71,7 @@ def load_pipe():
             variant="fp16",
             use_safetensors=True,
         ),
+        repo_id="stabilityai/stable-diffusion-xl-base-1.0",
     )
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
     _retry_load(
@@ -65,6 +81,7 @@ def load_pipe():
             subfolder="sdxl_models",
             weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
         ),
+        repo_id="h94/IP-Adapter",
     )
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
@@ -135,9 +152,6 @@ def rebuild_index(manifest, primary_photo, out):
 
 
 def choose_primary(photos):
-    # AUTO passes photos in the order declared by clone_reference_profile.json.
-    # The first file is the canonical identity anchor and is intentionally reused
-    # for every AI-clone scene to prevent scene-to-scene face switching.
     return photos[0]
 
 
