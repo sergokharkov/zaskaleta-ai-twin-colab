@@ -36,6 +36,30 @@ def copy_local(src: pathlib.Path, dst_dir: pathlib.Path, stem: str):
     return dst
 
 
+def run_inference(root, model_dir, config, attempt_results, batch_size):
+    cmd = [
+        sys.executable, '-m', 'scripts.inference',
+        '--inference_config', str(config),
+        '--result_dir', str(attempt_results),
+        '--unet_model_path', str(model_dir / 'unet.pth'),
+        '--unet_config', str(model_dir / 'musetalk.json'),
+        '--whisper_dir', str(root / 'models' / 'whisper'),
+        '--version', 'v15',
+        '--use_float16',
+        '--batch_size', str(batch_size),
+    ]
+    started = time.time()
+    result = subprocess.run(
+        cmd,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    rendered = newest_mp4(attempt_results, started)
+    return result, rendered
+
+
 def main():
     parser = argparse.ArgumentParser(description='MuseTalk 1.5 adapter for Zaskaleta AI Twin')
     parser.add_argument('--photo', required=True)
@@ -66,10 +90,8 @@ def main():
     model_dir = root / 'models' / 'musetalkV15'
     failures = []
 
-    # IMPORTANT: MuseTalk internally invokes ffmpeg with shell-style command strings.
-    # Google Drive paths can contain spaces/non-ASCII names (for example "Не чіпати "),
-    # which breaks those internal commands. Run the whole MuseTalk job from a simple
-    # local /content path, then copy only the finished MP4 back to Drive.
+    # MuseTalk internally invokes ffmpeg with shell-style command strings, so run
+    # inference from simple local /content paths and copy only the finished MP4 back.
     with tempfile.TemporaryDirectory(prefix='zaskaleta_musetalk_', dir='/content') as tmp_name:
         tmp = pathlib.Path(tmp_name)
         local_audio = copy_local(audio, tmp, 'audio')
@@ -77,51 +99,38 @@ def main():
         for attempt_no, (label, media) in enumerate(media_candidates, start=1):
             attempt_dir = tmp / f'attempt_{attempt_no}'
             attempt_dir.mkdir(parents=True, exist_ok=True)
-            attempt_results = attempt_dir / 'results'
-            attempt_results.mkdir(parents=True, exist_ok=True)
-
             local_media = copy_local(media, attempt_dir, 'input')
             config = attempt_dir / 'task.yaml'
             write_config(config, local_media, local_audio)
 
-            cmd = [
-                sys.executable, '-m', 'scripts.inference',
-                '--inference_config', str(config),
-                '--result_dir', str(attempt_results),
-                '--unet_model_path', str(model_dir / 'unet.pth'),
-                '--unet_config', str(model_dir / 'musetalk.json'),
-                '--whisper_dir', str(root / 'models' / 'whisper'),
-                '--version', 'v15',
-                '--use_float16',
-                '--batch_size', '4',
-            ]
+            # T4 normally benefits from batch 8. If VRAM is insufficient, retry the
+            # same media automatically with batch 4 rather than failing the whole day.
+            for batch_size in (8, 4):
+                attempt_results = attempt_dir / f'results_b{batch_size}'
+                attempt_results.mkdir(parents=True, exist_ok=True)
+                print(f'🎭 MuseTalk attempt {attempt_no}: {label}, batch={batch_size}')
+                try:
+                    result, rendered = run_inference(
+                        root, model_dir, config, attempt_results, batch_size
+                    )
+                except Exception as exc:
+                    failures.append(f'{label}/batch{batch_size}: subprocess error: {exc}')
+                    print(f'⚠️ {label} batch={batch_size} failed to start: {exc}')
+                    continue
 
-            print(f'🎭 MuseTalk attempt {attempt_no}: {label} -> local safe path {local_media}')
-            started = time.time()
-            try:
-                result = subprocess.run(
-                    cmd,
-                    cwd=str(root),
-                    capture_output=True,
-                    text=True,
-                    timeout=3600,
-                )
-            except Exception as exc:
-                failures.append(f'{label}: subprocess error: {exc}')
-                print(f'⚠️ {label} failed to start: {exc}')
-                continue
+                if result.returncode == 0 and rendered is not None:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(rendered, output)
+                    print(f'✅ MuseTalk output ({label}, batch={batch_size}): {output}')
+                    return
 
-            rendered = newest_mp4(attempt_results, started)
-            if result.returncode == 0 and rendered is not None:
-                output.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(rendered, output)
-                print(f'✅ MuseTalk output ({label}): {output}')
-                return
-
-            tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-7000:]
-            failures.append(f'{label}: returncode={result.returncode}\n{tail}')
-            print(f'⚠️ MuseTalk {label} did not produce MP4; trying fallback if available.')
-            print(tail[-2500:])
+                tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-7000:]
+                failures.append(f'{label}/batch{batch_size}: returncode={result.returncode}\n{tail}')
+                if batch_size == 8:
+                    print('⚠️ Batch 8 failed; retrying batch 4 automatically.')
+                else:
+                    print(f'⚠️ MuseTalk {label} did not produce MP4; trying fallback media if available.')
+                print(tail[-2500:])
 
     raise RuntimeError(
         'MuseTalk failed for all media candidates. Log tail:\n' +
