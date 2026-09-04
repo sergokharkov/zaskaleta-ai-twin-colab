@@ -23,16 +23,26 @@ def main():
     normalized = root / '_normalized'
     normalized.mkdir(exist_ok=True)
 
+    # One restrained grade across all scenes to make separately generated shots feel like one film.
+    # Keep it subtle: slight contrast, saturation restraint, mild sharpening and very fine grain.
+    vf = (
+        'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30,'
+        'eq=contrast=1.035:saturation=0.96:brightness=-0.005:gamma=0.995,'
+        'unsharp=5:5:0.25:5:5:0.0,'
+        'noise=alls=1.2:allf=t+u,'
+        'format=yuv420p'
+    )
+    af = 'aresample=48000:async=1:first_pts=0,loudnorm=I=-16:TP=-1.5:LRA=9'
+
     for scene in manifest['scenes']:
         src = root / scene['expected_clip']
         if not src.is_file():
             raise FileNotFoundError(f'Missing scene clip: {src}')
         dst = normalized / scene['expected_clip']
-        vf = 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30'
         run([
             'ffmpeg','-y','-i',str(src),'-vf',vf,
-            '-af','aresample=48000:async=1:first_pts=0',
-            '-c:v','libx264','-preset','medium','-crf','20','-pix_fmt','yuv420p',
+            '-af',af,
+            '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',
             '-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-movflags','+faststart',str(dst)
         ])
         clips.append(dst)
@@ -45,7 +55,7 @@ def main():
         'ffmpeg','-y','-f','concat','-safe','0','-i',str(concat_file),
         '-c:v','copy','-c:a','copy','-movflags','+faststart',str(output)
     ])
-    print(f'✅ Final synchronized episode: {output}')
+    print(f'✅ Final cinematic-grade synchronized episode: {output}')
 
 
 if __name__ == '__main__':
