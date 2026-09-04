@@ -1,0 +1,69 @@
+{
+  "name": "Zaskaleta Motion Learning Profile v1",
+  "status": "development",
+  "purpose": "Learn reusable human movement patterns without importing another person's identity, face, voice, clothing, background or scene.",
+  "engine": "MMPose 1.1.0",
+  "input_policy": {
+    "allowed": [
+      "user-owned real videos",
+      "videos used with permission",
+      "approved MASTER_BEHAVIOR videos"
+    ],
+    "extract_only": [
+      "2D body keypoints",
+      "relative joint trajectories",
+      "head and shoulder rhythm",
+      "gesture timing",
+      "posture transitions",
+      "movement speed and acceleration",
+      "pause and hold timing"
+    ],
+    "never_import": [
+      "face identity",
+      "voice",
+      "skin texture",
+      "hair",
+      "beard",
+      "clothing identity",
+      "background",
+      "captions",
+      "watermarks",
+      "scene appearance"
+    ]
+  },
+  "normalization": {
+    "translation_invariant": true,
+    "scale_invariant": true,
+    "identity_independent": true,
+    "coordinate_space": "person-bounding-box normalized 0..1",
+    "confidence_threshold": 0.25
+  },
+  "presets": [
+    "neutral",
+    "talking_calm",
+    "talking_confident",
+    "hand_gesture",
+    "slight_head_turn",
+    "walking",
+    "sitting",
+    "standing",
+    "emotional_reaction",
+    "presentation_style"
+  ],
+  "approval_flow": [
+    "CANDIDATE",
+    "EXTRACTED",
+    "MANUAL_REVIEW",
+    "APPROVED_MOTION",
+    "AVAILABLE_TO_MASTER_CLONE"
+  ],
+  "rejection_reasons": [
+    "poor pose detection",
+    "multiple people cause ambiguous motion",
+    "camera motion dominates subject motion",
+    "occlusion too high",
+    "movement is unnatural or unsuitable",
+    "rights or permission unclear"
+  ],
+  "safety_rule": "No extracted motion becomes part of MASTER_CLONE until manually approved."
+}
