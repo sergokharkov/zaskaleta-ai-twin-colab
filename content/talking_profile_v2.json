@@ -1,0 +1,66 @@
+{
+  "name": "Zaskaleta Talking Profile v2",
+  "status": "development",
+  "engine": "MuseTalk 1.5",
+  "goal": "Make speech appear physically produced by the visible speaker instead of layered over the video.",
+  "reference_policy": {
+    "primary": "MASTER_BEHAVIOR_01.mp4",
+    "supporting": "MASTER_BEHAVIOR_02.mp4",
+    "reference_video_is_motion_only": true,
+    "ignore_from_reference": [
+      "background",
+      "room",
+      "bed",
+      "captions",
+      "watermark",
+      "scene",
+      "wardrobe identity"
+    ]
+  },
+  "speech_motion_targets": {
+    "jaw": "clear but not exaggerated articulation synchronized to voiced phonemes",
+    "cheeks": "subtle cheek displacement coupled to mouth opening and consonant articulation",
+    "mouth": "stable mouth identity, natural closure at pauses, no rubber-mouth effect",
+    "eyes": "natural fixation with occasional blink and micro-saccade behavior",
+    "blink": "avoid repetitive blinking; prefer natural blink timing near phrase boundaries",
+    "head": "retain real reference micro-motion; do not synthesize artificial head sway",
+    "pause_expression": "mouth relaxes and jaw closes during pauses",
+    "sentence_end": "subtle facial relaxation after final syllables",
+    "breathing": "retain real breathing rhythm from approved behavior reference",
+    "shoulders": "retain real shoulder and neck motion from approved behavior reference"
+  },
+  "audio_alignment": {
+    "lipsync_sample_rate": 16000,
+    "final_audio_sample_rate": 24000,
+    "pad_end_only": true,
+    "do_not_loop_audio": true,
+    "do_not_repeat_reference_motion": true,
+    "preserve_reference_fps": 25,
+    "max_tempo_correction": 0.06
+  },
+  "voice_presets": [
+    "calm",
+    "confident",
+    "serious",
+    "warm",
+    "motivational",
+    "conversational"
+  ],
+  "default_voice_preset": "conversational",
+  "test_gate": {
+    "duration_seconds": 12,
+    "range_seconds": [8, 15],
+    "must_pass": [
+      "identity stable",
+      "no face drift",
+      "beard stable",
+      "hair stable",
+      "jaw follows speech",
+      "mouth closes naturally on pauses",
+      "voice sounds attached to the visible speaker",
+      "blink behavior looks natural",
+      "head motion remains natural",
+      "full requested test duration preserved"
+    ]
+  }
+}
