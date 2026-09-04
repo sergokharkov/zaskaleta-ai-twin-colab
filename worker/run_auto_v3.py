@@ -6,8 +6,27 @@ from pathlib import Path
 
 
 def run(cmd, env=None):
-    print('▶', ' '.join(map(str, cmd)))
-    subprocess.run([str(x) for x in cmd], check=True, env=env)
+    cmd = [str(x) for x in cmd]
+    print('▶', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    lines = []
+    for line in proc.stdout:
+        print(line, end='')
+        lines.append(line)
+    code = proc.wait()
+    if code != 0:
+        tail = ''.join(lines[-120:])
+        raise RuntimeError(
+            f"Command failed with exit code {code}: {' '.join(cmd)}\n"
+            f"----- child process log tail -----\n{tail}"
+        )
 
 
 def count_files(folder: Path, pattern: str):
