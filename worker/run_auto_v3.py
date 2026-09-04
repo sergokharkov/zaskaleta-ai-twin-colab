@@ -121,13 +121,11 @@ def main():
     else:
         print('↪ Main speech stage: resume existing')
 
-    # Render each SDXL keyframe in its own process. This fully frees CPU/GPU memory
-    # after every scene and preserves already completed files on Google Drive.
     keyframes = daydir / 'keyframes'
     keyframes.mkdir(parents=True, exist_ok=True)
     for scene_no in range(1, 9):
-        scene_file = keyframes / f'scene_{scene_no:02d}.png'
-        if scene_file.is_file() and scene_file.stat().st_size > 10_000:
+        kf = keyframes / f'scene_{scene_no:02d}.png'
+        if kf.is_file() and kf.stat().st_size > 10_000:
             print(f'↪ Scene {scene_no:02d}: existing keyframe, resume')
             continue
         print(f'🎨 Rendering Scene {scene_no:02d} in isolated process')
@@ -137,10 +135,10 @@ def main():
             '--photos', *photos,
             '--output-dir', keyframes,
             '--seed', '9969',
-            '--scene', scene_no,
+            '--scene', str(scene_no),
         ])
     if count_files(keyframes, 'scene_*.png') < 8:
-        raise RuntimeError(f'Only {count_files(keyframes, "scene_*.png")} of 8 keyframes exist after isolated rendering')
+        raise RuntimeError('Not all 8 keyframes are ready')
     print('✅ Keyframes: 8/8 ready')
 
     animated = daydir / 'animated'
@@ -154,7 +152,14 @@ def main():
     else:
         print('↪ Animation: 8 existing, resume')
 
-    if count_files(daydir, 'scene_??.mp4') < 8:
+    # Render each final scene in its own process. This prevents MuseTalk/Whisper/UNet VRAM
+    # from accumulating across scenes and makes the stage fully resumable.
+    for scene_no in range(1, 9):
+        scene_target = daydir / f'scene_{scene_no:02d}.mp4'
+        if scene_target.is_file() and scene_target.stat().st_size > 50_000:
+            print(f'↪ Scene {scene_no:02d}: existing final clip, resume')
+            continue
+        print(f'🎭 Rendering Scene {scene_no:02d} final clip in isolated process')
         run([
             python_bin, worker / 'render_scene_clips.py',
             '--manifest', daydir / 'scene_prompts.json',
@@ -165,9 +170,11 @@ def main():
             '--worker-dir', worker,
             '--python-bin', python_bin,
             '--output-dir', daydir,
+            '--scene', str(scene_no),
         ])
-    else:
-        print('↪ Scene render: 8 existing, resume')
+    if count_files(daydir, 'scene_??.mp4') < 8:
+        raise RuntimeError('Not all 8 final scene clips are ready')
+    print('✅ Scene render: 8/8 ready')
 
     run([
         python_bin, worker / 'assemble_daily_episode.py',
