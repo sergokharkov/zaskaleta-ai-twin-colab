@@ -104,17 +104,17 @@ def main():
                 args.python_bin, str(worker / 'lipsync_musetalk.py'),
                 '--photo', str(image), '--audio', str(chosen_audio), '--output', str(raw)
             ]
-            # Prefer the already animated scene as MuseTalk input. This preserves motion
-            # and avoids MuseTalk's fragile single-image cleanup path.
             if silent.is_file():
                 cmd += ['--reference-video', str(silent)]
             run(cmd)
             duration = max(float(scene.get('seconds', 8)), probe_duration(chosen_audio) + 0.4)
+            # veryfast materially reduces CPU re-encode time while keeping the same
+            # 1080x1920 delivery resolution and CRF quality target.
             run([
                 'ffmpeg','-y','-i',str(raw),
                 '-vf',f'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,tpad=stop_mode=clone:stop_duration={duration}',
                 '-af',f'apad=pad_dur={duration}','-t',str(duration),
-                '-c:v','libx264','-preset','medium','-crf','19','-c:a','aac','-b:a','192k','-movflags','+faststart',str(target)
+                '-c:v','libx264','-preset','veryfast','-crf','19','-c:a','aac','-b:a','192k','-movflags','+faststart',str(target)
             ])
             raw.unlink(missing_ok=True)
             print(f'🗣️ Scene {n:02d}: lip-sync render from animated reference')
