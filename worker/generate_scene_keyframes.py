@@ -9,7 +9,7 @@ from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
 from transformers import CLIPVisionModelWithProjection
 
 NEGATIVE = (
-    "identity drift, changed face, deformed face, asymmetrical eyes, bad anatomy, deformed hands, "
+    "identity drift, different person, changed face, changed beard, changed hairstyle, deformed face, asymmetrical eyes, bad anatomy, deformed hands, "
     "extra fingers, missing fingers, duplicate person, plastic skin, beauty filter, cartoon, illustration, "
     "low quality, blurry, watermark, text"
 )
@@ -53,8 +53,9 @@ def compact_prompt(scene_prompt: str, focus: str):
         text = text[:700].rsplit(" ", 1)[0]
     return (
         focus + text
-        + " Photorealistic European cinema still, natural skin, realistic anatomy, authentic German environment, "
-          "35mm lens, cinematic composition, realistic clothing, vertical 9:16."
+        + " Photorealistic European cinema still, same recognizable man in every scene, natural pores and facial asymmetry, "
+          "realistic anatomy, authentic German environment, coherent motivated lighting, 35mm lens, cinematic composition, "
+          "realistic clothing fabric, vertical 9:16."
     )
 
 
@@ -67,7 +68,7 @@ def render_one(pipe, prompt, ref, seed, steps, width, height):
         width=width,
         height=height,
         num_inference_steps=steps,
-        guidance_scale=5.5,
+        guidance_scale=5.2,
         generator=generator,
     ).images[0]
 
@@ -82,7 +83,7 @@ def free_memory():
             pass
 
 
-def rebuild_index(manifest, photos, out):
+def rebuild_index(manifest, primary_photo, out):
     rows = []
     for scene in manifest["scenes"]:
         n = int(scene["n"])
@@ -94,10 +95,17 @@ def rebuild_index(manifest, photos, out):
         rows.append({
             "scene": n,
             "image": str(path),
-            "reference": None if secondary_only else photos[(n - 1) % len(photos)],
+            "reference": None if secondary_only else primary_photo,
             "focus": "SECONDARY" if secondary_only else "AI_CLONE",
         })
     (out / "keyframes.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def choose_primary(photos):
+    # AUTO passes photos in the order declared by clone_reference_profile.json.
+    # The first file is the canonical identity anchor and is intentionally reused
+    # for every AI-clone scene to prevent scene-to-scene face switching.
+    return photos[0]
 
 
 def main():
@@ -116,6 +124,7 @@ def main():
     photos = [p for p in args.photos if Path(p).is_file()]
     if not photos:
         raise SystemExit("No valid MASTER_PHOTOS")
+    primary_photo = choose_primary(photos)
 
     scenes = manifest["scenes"]
     if args.scene is not None:
@@ -128,11 +137,10 @@ def main():
         path = out / f"scene_{n:02d}.png"
         if path.is_file() and path.stat().st_size > 10_000:
             print(f"↪ Scene {n:02d}: existing keyframe, resume")
-            rebuild_index(manifest, photos, out)
+            rebuild_index(manifest, primary_photo, out)
             continue
 
-        ref_path = photos[(n - 1) % len(photos)]
-        ref = open_reference(ref_path)
+        ref = open_reference(primary_photo)
         lines = scene.get("dialogue", [])
         secondary_only = bool(lines) and all(x.get("speaker") != "AI_CLONE" for x in lines)
         focus_name = "SECONDARY" if secondary_only else "AI_CLONE"
@@ -142,8 +150,8 @@ def main():
             pipe.set_ip_adapter_scale(0.0)
             focus = "Reverse-shot on supporting speaker; AI clone off-camera. Visible speaker must not resemble AI clone. "
         else:
-            pipe.set_ip_adapter_scale(0.82)
-            focus = "Persistent AI clone is the visible main subject; preserve recognizable facial identity. "
+            pipe.set_ip_adapter_scale(0.88)
+            focus = "Persistent AI clone is the visible main subject. Preserve the canonical identity exactly: same face shape, eyes, nose, lips, beard, hairstyle, hairline, age and skin tone. "
 
         prompt = compact_prompt(scene["prompt"], focus)
         free_memory()
@@ -160,10 +168,10 @@ def main():
             render_mode = "640x1088-fallback"
 
         image.save(path, quality=95)
-        print(f"✅ Scene {n:02d}: {path.name} | focus={focus_name} | {render_mode}")
+        print(f"✅ Scene {n:02d}: {path.name} | focus={focus_name} | identity_anchor={Path(primary_photo).name} | {render_mode}")
         del image, ref, pipe
         free_memory()
-        rebuild_index(manifest, photos, out)
+        rebuild_index(manifest, primary_photo, out)
 
     print("✅ Requested keyframe generation complete")
 
