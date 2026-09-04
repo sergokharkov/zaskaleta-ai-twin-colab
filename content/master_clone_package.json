@@ -1,0 +1,148 @@
+{
+  "package_name": "Zaskaleta MASTER CLONE",
+  "version": "v1",
+  "status": "development",
+  "principle": "MASTER CLONE first. Scenes are external and must never become part of clone identity.",
+  "components": {
+    "identity": {
+      "canonical_anchor": "MVIMG_20260830_144834.jpg",
+      "supporting_reference_count": 5,
+      "lock": [
+        "exact facial structure",
+        "natural asymmetry",
+        "eye shape",
+        "nose",
+        "lips",
+        "jaw",
+        "beard shape density and color",
+        "hairstyle and hairline",
+        "age",
+        "skin tone",
+        "stable identity across frontal, profile and 3/4 views"
+      ],
+      "forbidden": [
+        "beautification",
+        "rejuvenation",
+        "face reshaping",
+        "face swap",
+        "lookalike substitution",
+        "scene-to-scene identity switching",
+        "AI-generated rejected frames as identity references"
+      ]
+    },
+    "motion": {
+      "profile": "Zaskaleta Motion Profile v1",
+      "primary_reference": "MASTER_BEHAVIOR_01.mp4",
+      "supporting_reference": "MASTER_BEHAVIOR_02.mp4",
+      "auto_discovery_glob": "MASTER_BEHAVIOR_*.mp4",
+      "presets": [
+        "neutral",
+        "talking_calm",
+        "talking_confident",
+        "slight_head_turn",
+        "subtle_gesture",
+        "natural_blink",
+        "breathing",
+        "shoulder_movement"
+      ],
+      "extract_only": [
+        "head movement",
+        "blinking",
+        "eye micro-movements",
+        "shoulder motion",
+        "neck motion",
+        "breathing",
+        "body rhythm",
+        "talking behavior",
+        "posture",
+        "gesture rhythm"
+      ],
+      "ignore": [
+        "background",
+        "room",
+        "bed",
+        "captions",
+        "watermark",
+        "scene",
+        "wardrobe as identity"
+      ]
+    },
+    "talking": {
+      "engine": "MuseTalk 1.5",
+      "required_behaviors": [
+        "jaw motion",
+        "cheek motion",
+        "mouth articulation",
+        "natural blink during speech",
+        "head micro-motion",
+        "eye behavior",
+        "pause-aware expression",
+        "sentence-end facial relaxation",
+        "speaking rhythm"
+      ]
+    },
+    "voice": {
+      "master": "Zaskaleta_AI_Voice_Master.mp3",
+      "language": "uk",
+      "base_tts": "facebook/mms-tts-ukr",
+      "voice_conversion": "OpenVoice V2",
+      "presets": [
+        "calm",
+        "confident",
+        "serious",
+        "warm",
+        "motivational",
+        "conversational"
+      ],
+      "targets": [
+        "natural sentence intonation",
+        "soft pauses",
+        "non-monotone phrase rhythm",
+        "natural emotional dynamics",
+        "speech that feels produced by the visible speaker"
+      ]
+    }
+  },
+  "reference_policy": {
+    "approved": [
+      "real photos",
+      "real videos",
+      "real voice",
+      "manually approved good generations"
+    ],
+    "rejected": [
+      "face drift",
+      "wrong beard",
+      "wrong age",
+      "wrong mouth",
+      "wrong jaw",
+      "unnatural motion",
+      "wrong identity"
+    ],
+    "rule": "Never auto-train on all generated outputs. Only APPROVED material may become future reference material."
+  },
+  "test_gates": [
+    {"stage":"8-15s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
+    {"stage":"15-30s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
+    {"stage":"30-45s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
+    {"stage":"45-60s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
+    {"stage":"60-90s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]}
+  ],
+  "folder_layout": [
+    "MASTER_CLONE/IDENTITY",
+    "MASTER_CLONE/MOTION",
+    "MASTER_CLONE/TALKING",
+    "MASTER_CLONE/VOICE",
+    "MASTER_CLONE/APPROVED",
+    "MASTER_CLONE/REJECTED",
+    "MASTER_CLONE/VERSIONS"
+  ],
+  "scene_independence": {
+    "scene": "external",
+    "background": "external",
+    "location": "external",
+    "wardrobe": "external unless explicitly locked per production",
+    "captions": "external",
+    "watermark": "external"
+  }
+}
