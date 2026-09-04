@@ -19,7 +19,7 @@ wavmark>=0.0.3
 torch==2.0.1
 torchvision==0.15.2
 torchaudio==2.0.2
-diffusers==0.32.2
+diffusers==0.30.2
 safetensors>=0.4
 pillow>=10
 sentencepiece>=0.2
