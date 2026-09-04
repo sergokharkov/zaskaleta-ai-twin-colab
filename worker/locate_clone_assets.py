@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 
 
+PRIORITY_BEHAVIOR_NAME = 'MASTER_BEHAVIOR_01.mp4'
+
+
 def candidate_roots(root: Path):
     roots = [root]
     drive_root = root.parent
@@ -68,13 +71,29 @@ def main():
             photos.append(str(p))
 
     videos = []
+    seen = set()
+
+    # User-approved canonical behavior clip. Always place it first when available,
+    # regardless of whether the older static profile has been updated yet.
+    priority = find_unique(root, PRIORITY_BEHAVIOR_NAME)
+    if priority and priority.is_file():
+        videos.append({
+            'path': str(priority),
+            'filename': PRIORITY_BEHAVIOR_NAME,
+            'role': 'PRIMARY_BEHAVIOR_REFERENCE',
+            'priority': 1,
+            'notes': 'User-approved real reference: natural posture, head motion, blinking and body rhythm.'
+        })
+        seen.add(priority.resolve())
+
     for item in profile.get('behavior_videos', []):
         name = item['filename']
         p = base / name
         if not p.is_file():
             p = find_unique(root, name)
-        if p and p.is_file():
+        if p and p.is_file() and p.resolve() not in seen:
             videos.append({'path': str(p), **item})
+            seen.add(p.resolve())
 
     if len(photos) < 5:
         raise SystemExit(f'Only {len(photos)} master photos found; need at least 5')
@@ -84,6 +103,7 @@ def main():
         'master_voice': str(voice),
         'master_photos': photos[:6],
         'behavior_videos': videos,
+        'primary_behavior': str(priority) if priority and priority.is_file() else None,
         'profile': profile,
     }
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -92,6 +112,8 @@ def main():
     print('VOICE:', voice.name)
     print('PHOTOS:', len(photos[:6]))
     print('VIDEOS:', len(videos))
+    if priority and priority.is_file():
+        print('⭐ PRIMARY BEHAVIOR:', priority.name)
 
 
 if __name__ == '__main__':
