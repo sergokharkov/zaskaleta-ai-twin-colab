@@ -69,7 +69,9 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     scenes = manifest['scenes']
 
-    preferred = [1, 3, 5, 7, 8]
+    # Four strong on-camera beats per ordinary episode. Remaining narration is still
+    # spoken by the main character, but as voiceover over cinematic cutaways.
+    preferred_talking = [1, 3, 6, 8]
     dialogue_secondary = set()
     dialogue_clone = {}
     for scene in scenes:
@@ -82,7 +84,7 @@ def main():
             if clone_lines:
                 dialogue_clone[n] = ' '.join(clone_lines)
 
-    narration_slots = [n for n in preferred if n not in dialogue_secondary and n not in dialogue_clone]
+    narration_slots = [int(s['n']) for s in scenes if int(s['n']) not in dialogue_secondary and int(s['n']) not in dialogue_clone]
     narration_by_scene = distribute(split_sentences(episode.get('voiceover', '')), narration_slots)
 
     scene_texts = {}
@@ -90,10 +92,13 @@ def main():
         n = int(scene['n'])
         if n in dialogue_clone:
             scene_texts[n] = dialogue_clone[n]
-        elif n in narration_by_scene:
-            scene_texts[n] = narration_by_scene[n]
         else:
-            scene_texts[n] = ''
+            scene_texts[n] = narration_by_scene.get(n, '')
+
+    if not any(scene_texts.values()):
+        (out / 'scene_speech_manifest.json').write_text('[]', encoding='utf-8')
+        print('✅ No main-character speech required')
+        return
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer, tts, converter = load_models(device)
@@ -104,18 +109,28 @@ def main():
     audio_manifest = []
     for scene in scenes:
         n = int(scene['n'])
-        text = scene_texts[n]
+        text = scene_texts.get(n, '')
         if not text:
-            audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': '', 'audio': None, 'talking': False})
+            audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': '', 'audio': None, 'talking': False, 'mode': 'silent'})
             continue
         wav = out / f'scene_{n:02d}_clone.wav'
         synth(text, tokenizer, tts, converter, target_se, out, wav, device)
-        audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': text, 'audio': str(wav), 'talking': True})
-        print(f'✅ Scene {n:02d} AI_CLONE: {text}')
+        talking = n in preferred_talking or n in dialogue_clone
+        mode = 'talking' if talking else 'voiceover'
+        audio_manifest.append({
+            'scene': n,
+            'speaker': 'AI_CLONE',
+            'text': text,
+            'audio': str(wav),
+            'talking': talking,
+            'mode': mode,
+        })
+        icon = '🗣️' if talking else '🎙️'
+        print(f'{icon} Scene {n:02d} {mode}: {text}')
 
     normalized.unlink(missing_ok=True)
     (out / 'scene_speech_manifest.json').write_text(json.dumps(audio_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-    print('✅ Speaking beats + cinematic cutaways prepared')
+    print('✅ 4 speaking beats + main-character voiceover cutaways prepared')
 
 
 if __name__ == '__main__':
