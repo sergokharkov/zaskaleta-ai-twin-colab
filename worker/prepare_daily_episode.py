@@ -1,14 +1,46 @@
 import argparse
 import json
+import re
 from pathlib import Path
+
+
+def _repair_scalar_line(line: str, key: str) -> str:
+    marker = f'"{key}": "'
+    if marker not in line:
+        return line
+    prefix, rest = line.split(marker, 1)
+    suffix = '",'
+    if not rest.endswith(suffix):
+        return line
+    body = rest[:-2]
+    out = []
+    opening = True
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == '"' and (i == 0 or body[i - 1] != '\\'):
+            out.append('«' if opening else '»')
+            opening = not opening
+        else:
+            out.append(ch)
+        i += 1
+    return prefix + marker + ''.join(out) + suffix
 
 
 def load_json_tolerant(path: Path):
     text = path.read_text(encoding='utf-8')
-    # Repair two legacy unescaped quotation marks in the 30-day script file.
-    text = text.replace('Не кожне "ні" — слабкість.', 'Не кожне «ні» — слабкість.')
-    text = text.replace('Сказати "я зроблю" займає секунду.', 'Сказати «я зроблю» займає секунду.')
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        keys = ('voiceover', 'hook', 'title', 'city', 'location', 'outfit')
+        fixed_lines = []
+        for line in text.splitlines():
+            repaired = line
+            for key in keys:
+                repaired = _repair_scalar_line(repaired, key)
+            fixed_lines.append(repaired)
+        fixed = '\n'.join(fixed_lines)
+        return json.loads(fixed)
 
 
 def flatten_realism(realism_lock):
