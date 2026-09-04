@@ -3,6 +3,14 @@ import json
 from pathlib import Path
 
 
+def load_json_tolerant(path: Path):
+    text = path.read_text(encoding='utf-8')
+    # Repair two legacy unescaped quotation marks in the 30-day script file.
+    text = text.replace('Не кожне "ні" — слабкість.', 'Не кожне «ні» — слабкість.')
+    text = text.replace('Сказати "я зроблю" займає секунду.', 'Сказати «я зроблю» займає секунду.')
+    return json.loads(text)
+
+
 def flatten_realism(realism_lock):
     parts = []
     for group, rules in (realism_lock or {}).items():
@@ -22,7 +30,7 @@ def main():
     args = p.parse_args()
 
     plan_path = Path(args.plan)
-    plan = json.loads(plan_path.read_text(encoding='utf-8'))
+    plan = load_json_tolerant(plan_path)
     day = next((d for d in plan['days'] if d['day'] == args.day), None)
     if not day:
         raise SystemExit(f'Day {args.day} not found')
