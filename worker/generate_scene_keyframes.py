@@ -33,7 +33,6 @@ def load_pipe():
         subfolder="sdxl_models",
         weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
     )
-    # Keep IP-Adapter attention processors intact.
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
     return pipe
@@ -49,13 +48,11 @@ def open_reference(path: str):
 
 
 def compact_prompt(scene_prompt: str, focus: str):
-    # Keep prompt under CLIP practical limits; the full production prompt remains in scene_prompts.json.
     text = " ".join(str(scene_prompt).split())
-    if len(text) > 900:
-        text = text[:900].rsplit(" ", 1)[0]
+    if len(text) > 700:
+        text = text[:700].rsplit(" ", 1)[0]
     return (
-        focus
-        + text
+        focus + text
         + " Photorealistic European cinema still, natural skin, realistic anatomy, authentic German environment, "
           "35mm lens, cinematic composition, realistic clothing, vertical 9:16."
     )
@@ -70,7 +67,7 @@ def render_one(pipe, prompt, ref, seed, steps, width, height):
         width=width,
         height=height,
         num_inference_steps=steps,
-        guidance_scale=5.8,
+        guidance_scale=5.5,
         generator=generator,
     ).images[0]
 
@@ -85,13 +82,32 @@ def free_memory():
             pass
 
 
+def rebuild_index(manifest, photos, out):
+    rows = []
+    for scene in manifest["scenes"]:
+        n = int(scene["n"])
+        path = out / f"scene_{n:02d}.png"
+        if not path.is_file() or path.stat().st_size <= 10_000:
+            continue
+        lines = scene.get("dialogue", [])
+        secondary_only = bool(lines) and all(x.get("speaker") != "AI_CLONE" for x in lines)
+        rows.append({
+            "scene": n,
+            "image": str(path),
+            "reference": None if secondary_only else photos[(n - 1) % len(photos)],
+            "focus": "SECONDARY" if secondary_only else "AI_CLONE",
+        })
+    (out / "keyframes.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--photos", nargs="+", required=True)
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--seed", type=int, default=9969)
-    ap.add_argument("--steps", type=int, default=24)
+    ap.add_argument("--steps", type=int, default=22)
+    ap.add_argument("--scene", type=int, default=None, help="Render only one scene, then exit to fully release GPU memory")
     args = ap.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
@@ -101,48 +117,38 @@ def main():
     if not photos:
         raise SystemExit("No valid MASTER_PHOTOS")
 
-    pipe = load_pipe()
-    results = []
+    scenes = manifest["scenes"]
+    if args.scene is not None:
+        scenes = [s for s in scenes if int(s["n"]) == args.scene]
+        if not scenes:
+            raise SystemExit(f"Scene {args.scene} not found in manifest")
 
-    for scene in manifest["scenes"]:
+    for scene in scenes:
         n = int(scene["n"])
         path = out / f"scene_{n:02d}.png"
+        if path.is_file() and path.stat().st_size > 10_000:
+            print(f"↪ Scene {n:02d}: existing keyframe, resume")
+            rebuild_index(manifest, photos, out)
+            continue
+
         ref_path = photos[(n - 1) % len(photos)]
+        ref = open_reference(ref_path)
         lines = scene.get("dialogue", [])
         secondary_only = bool(lines) and all(x.get("speaker") != "AI_CLONE" for x in lines)
         focus_name = "SECONDARY" if secondary_only else "AI_CLONE"
 
-        # Resume per scene: never regenerate a valid existing keyframe.
-        if path.is_file() and path.stat().st_size > 10_000:
-            results.append({
-                "scene": n,
-                "image": str(path),
-                "reference": None if secondary_only else ref_path,
-                "focus": focus_name,
-                "resumed": True,
-            })
-            print(f"↪ Scene {n:02d}: existing keyframe, resume")
-            continue
-
-        ref = open_reference(ref_path)
+        pipe = load_pipe()
         if secondary_only:
             pipe.set_ip_adapter_scale(0.0)
-            focus = (
-                "Reverse-shot on supporting speaker; AI clone off-camera or only blurred shoulder. "
-                "Visible speaker must not resemble the AI clone. "
-            )
+            focus = "Reverse-shot on supporting speaker; AI clone off-camera. Visible speaker must not resemble AI clone. "
         else:
             pipe.set_ip_adapter_scale(0.82)
-            focus = "Persistent AI clone is the visible main subject; preserve his recognizable facial identity. "
+            focus = "Persistent AI clone is the visible main subject; preserve recognizable facial identity. "
 
         prompt = compact_prompt(scene["prompt"], focus)
         free_memory()
         try:
-            # T4-safe primary size, still close to 9:16.
-            image = render_one(
-                pipe, prompt, ref, args.seed + n * 101,
-                args.steps, 704, 1216,
-            )
+            image = render_one(pipe, prompt, ref, args.seed + n * 101, args.steps, 704, 1216)
             render_mode = "704x1216"
         except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
             msg = str(e).lower()
@@ -150,27 +156,16 @@ def main():
                 raise
             print(f"⚠️ Scene {n:02d}: GPU pressure, retrying at fallback size")
             free_memory()
-            image = render_one(
-                pipe, prompt, ref, args.seed + n * 101,
-                min(args.steps, 20), 640, 1088,
-            )
+            image = render_one(pipe, prompt, ref, args.seed + n * 101, min(args.steps, 18), 640, 1088)
             render_mode = "640x1088-fallback"
 
         image.save(path, quality=95)
-        del image, ref
-        free_memory()
-        results.append({
-            "scene": n,
-            "image": str(path),
-            "reference": None if secondary_only else ref_path,
-            "focus": focus_name,
-            "render_mode": render_mode,
-            "resumed": False,
-        })
         print(f"✅ Scene {n:02d}: {path.name} | focus={focus_name} | {render_mode}")
+        del image, ref, pipe
+        free_memory()
+        rebuild_index(manifest, photos, out)
 
-    (out / "keyframes.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("✅ All cinematic scene keyframes generated/resumed")
+    print("✅ Requested keyframe generation complete")
 
 
 if __name__ == "__main__":
