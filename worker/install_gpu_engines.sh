@@ -37,14 +37,14 @@ step "AI Twin runtime dependencies"
 "${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements.txt"
 "${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements-gpu.txt"
 
-step "MuseTalk OpenMMLab dependencies"
-"${PYTHON_BIN}" -m pip install --no-cache-dir -U openmim
-if ! "${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose" >/dev/null 2>&1; then
-  "${VENV_DIR}/bin/mim" install mmengine
-  "${VENV_DIR}/bin/mim" install "mmcv==2.0.1"
-  "${VENV_DIR}/bin/mim" install "mmdet==3.1.0"
-  "${VENV_DIR}/bin/mim" install "mmpose==1.1.0"
-fi
+step "MuseTalk OpenMMLab dependencies (Colab-safe)"
+# Full mmcv==2.0.1 may require a local C++/CUDA build on Python 3.11/Torch 2.4.
+# MuseTalk's preprocessing path only needs the Python APIs, so use mmcv-lite.
+"${PYTHON_BIN}" -m pip install --upgrade "mmengine>=0.8,<1.0"
+"${PYTHON_BIN}" -m pip install --upgrade "mmcv-lite==2.0.1"
+"${PYTHON_BIN}" -m pip install --upgrade "mmdet==3.1.0"
+"${PYTHON_BIN}" -m pip install --upgrade "mmpose==1.1.0"
+"${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose; print('MMLab OK:', mmengine.__version__, mmcv.__version__, mmdet.__version__, mmpose.__version__)"
 
 step "OpenVoice package without legacy pins"
 if [ ! -d "${OPENVOICE_ROOT}/.git" ]; then
