@@ -28,12 +28,30 @@ export PATH="${VENV_DIR}/bin:${PATH}"
 "${PYTHON_BIN}" -c "import pkg_resources, setuptools; print('setuptools:', setuptools.__version__); print('pkg_resources: OK')"
 
 step "MuseTalk-compatible PyTorch stack"
-# MuseTalk/OpenMMLab 1.x is most reliable with Torch 2.0.1 + CUDA 11.8.
-# CUDA 11.8 wheels run correctly on current Colab NVIDIA drivers.
-"${PYTHON_BIN}" -m pip uninstall -y torch torchvision torchaudio mmcv mmcv-lite >/dev/null 2>&1 || true
-"${PYTHON_BIN}" -m pip install --no-cache-dir \
-  torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 \
-  --index-url https://download.pytorch.org/whl/cu118
+# Only reinstall the large CUDA wheels when the runtime does not already have
+# the required MuseTalk/OpenMMLab-compatible versions.
+if "${PYTHON_BIN}" - <<'PY'
+import sys
+try:
+    import torch, torchvision, torchaudio
+    ok = (
+        torch.__version__.startswith('2.0.1') and
+        torchvision.__version__.startswith('0.15.2') and
+        torchaudio.__version__.startswith('2.0.2') and
+        torch.version.cuda == '11.8'
+    )
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+PY
+then
+  echo "Compatible Torch stack already installed; resume."
+else
+  "${PYTHON_BIN}" -m pip uninstall -y torch torchvision torchaudio mmcv mmcv-lite >/dev/null 2>&1 || true
+  "${PYTHON_BIN}" -m pip install --no-cache-dir \
+    torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 \
+    --index-url https://download.pytorch.org/whl/cu118
+fi
 "${PYTHON_BIN}" -c "import torch, torchvision, torchaudio; print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available(), 'CUDA build:', torch.version.cuda); print('TorchVision:', torchvision.__version__); print('TorchAudio:', torchaudio.__version__)"
 
 step "Clone MuseTalk"
@@ -49,24 +67,37 @@ step "AI Twin runtime dependencies"
 "${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements-gpu.txt"
 
 step "MuseTalk OpenMMLab dependencies"
-# IMPORTANT: use FULL mmcv, not mmcv-lite. MMPose/MMDDetection import mmcv.ops,
-# which requires the compiled mmcv._ext extension.
-"${PYTHON_BIN}" -m pip uninstall -y mmcv mmcv-lite >/dev/null 2>&1 || true
-"${PYTHON_BIN}" -m pip install --no-cache-dir "mmengine>=0.8,<1.0"
-"${PYTHON_BIN}" -m pip install --no-cache-dir "mmcv==2.0.1" \
-  -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
-"${PYTHON_BIN}" -m pip install --no-cache-dir "mmdet==3.1.0"
-
-# mmpose 1.1.0 depends on legacy chumpy 0.70. Install the patched source first.
-if ! "${PYTHON_BIN}" -m pip show chumpy >/dev/null 2>&1; then
-  "${PYTHON_BIN}" -m pip install --no-build-isolation \
-    "git+https://github.com/mattloper/chumpy.git@4228d703b622e172e843438fe0fada102979361a"
+if "${PYTHON_BIN}" - <<'PY'
+import sys
+try:
+    import mmengine, mmcv, mmdet, mmpose
+    from mmcv.ops import nms
+    from mmpose.apis import inference_topdown, init_model
+    ok = (
+        mmcv.__version__ == '2.0.1' and
+        mmdet.__version__ == '3.1.0' and
+        mmpose.__version__ == '1.1.0'
+    )
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+PY
+then
+  echo "Compatible OpenMMLab stack already installed; resume."
+else
+  "${PYTHON_BIN}" -m pip uninstall -y mmcv mmcv-lite >/dev/null 2>&1 || true
+  "${PYTHON_BIN}" -m pip install --no-cache-dir "mmengine>=0.8,<1.0"
+  "${PYTHON_BIN}" -m pip install --no-cache-dir "mmcv==2.0.1" \
+    -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html
+  "${PYTHON_BIN}" -m pip install --no-cache-dir "mmdet==3.1.0"
+  if ! "${PYTHON_BIN}" -m pip show chumpy >/dev/null 2>&1; then
+    "${PYTHON_BIN}" -m pip install --no-build-isolation \
+      "git+https://github.com/mattloper/chumpy.git@4228d703b622e172e843438fe0fada102979361a"
+  fi
+  "${PYTHON_BIN}" -m pip install --no-cache-dir "mmpose==1.1.0"
 fi
-"${PYTHON_BIN}" -m pip install --no-cache-dir "mmpose==1.1.0"
 
 step "Restore MuseTalk scientific stack"
-# OpenMMLab can upgrade NumPy/Matplotlib. Restore versions compatible with
-# MuseTalk 1.5 and TensorFlow 2.12 without removing the full MMCV extension.
 "${PYTHON_BIN}" -m pip install --force-reinstall --no-cache-dir \
   "numpy==1.23.5" "opencv-python==4.9.0.80"
 "${PYTHON_BIN}" -m pip install --force-reinstall --no-deps \
@@ -108,32 +139,61 @@ mkdir -p \
   "${MUSETALK_ROOT}/models/whisper"
 
 step "Download MuseTalk models"
-hf download TMElyralab/MuseTalk \
-  --local-dir "${MUSETALK_ROOT}/models" \
-  --include "musetalkV15/musetalk.json" "musetalkV15/unet.pth"
+# Download each required filename explicitly. Do not combine positional
+# filenames with --include: the HF CLI ignores --include in that case.
+hf download TMElyralab/MuseTalk musetalkV15/musetalk.json \
+  --local-dir "${MUSETALK_ROOT}/models"
+hf download TMElyralab/MuseTalk musetalkV15/unet.pth \
+  --local-dir "${MUSETALK_ROOT}/models"
 
-hf download stabilityai/sd-vae-ft-mse \
-  --local-dir "${MUSETALK_ROOT}/models/sd-vae" \
-  --include "config.json" "diffusion_pytorch_model.bin"
+hf download stabilityai/sd-vae-ft-mse config.json \
+  --local-dir "${MUSETALK_ROOT}/models/sd-vae"
+hf download stabilityai/sd-vae-ft-mse diffusion_pytorch_model.bin \
+  --local-dir "${MUSETALK_ROOT}/models/sd-vae"
 
-hf download openai/whisper-tiny \
-  --local-dir "${MUSETALK_ROOT}/models/whisper" \
-  --include "config.json" "pytorch_model.bin" "preprocessor_config.json"
+hf download openai/whisper-tiny config.json \
+  --local-dir "${MUSETALK_ROOT}/models/whisper"
+hf download openai/whisper-tiny pytorch_model.bin \
+  --local-dir "${MUSETALK_ROOT}/models/whisper"
+hf download openai/whisper-tiny preprocessor_config.json \
+  --local-dir "${MUSETALK_ROOT}/models/whisper"
 
-hf download yzd-v/DWPose \
-  --local-dir "${MUSETALK_ROOT}/models/dwpose" \
-  --include "dw-ll_ucoco_384.pth"
+hf download yzd-v/DWPose dw-ll_ucoco_384.pth \
+  --local-dir "${MUSETALK_ROOT}/models/dwpose"
+hf download ByteDance/LatentSync latentsync_syncnet.pt \
+  --local-dir "${MUSETALK_ROOT}/models/syncnet"
 
-hf download ByteDance/LatentSync \
-  --local-dir "${MUSETALK_ROOT}/models/syncnet" \
-  --include "latentsync_syncnet.pt"
+if [ ! -s "${MUSETALK_ROOT}/models/face-parse-bisent/79999_iter.pth" ]; then
+  "${VENV_DIR}/bin/gdown" 154JgKpzCPW82qINcVieuPH3fZ2e0P812 \
+    -O "${MUSETALK_ROOT}/models/face-parse-bisent/79999_iter.pth"
+fi
+if [ ! -s "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth" ]; then
+  curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
+    -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
+fi
 
-"${VENV_DIR}/bin/gdown" 154JgKpzCPW82qINcVieuPH3fZ2e0P812 \
-  -O "${MUSETALK_ROOT}/models/face-parse-bisent/79999_iter.pth"
-
-curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
-  -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
+step "Verify MuseTalk model files"
+required_files=(
+  "${MUSETALK_ROOT}/models/musetalkV15/musetalk.json"
+  "${MUSETALK_ROOT}/models/musetalkV15/unet.pth"
+  "${MUSETALK_ROOT}/models/sd-vae/config.json"
+  "${MUSETALK_ROOT}/models/sd-vae/diffusion_pytorch_model.bin"
+  "${MUSETALK_ROOT}/models/whisper/config.json"
+  "${MUSETALK_ROOT}/models/whisper/pytorch_model.bin"
+  "${MUSETALK_ROOT}/models/whisper/preprocessor_config.json"
+  "${MUSETALK_ROOT}/models/dwpose/dw-ll_ucoco_384.pth"
+  "${MUSETALK_ROOT}/models/syncnet/latentsync_syncnet.pt"
+  "${MUSETALK_ROOT}/models/face-parse-bisent/79999_iter.pth"
+  "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
+)
+for f in "${required_files[@]}"; do
+  if [ ! -s "$f" ]; then
+    echo "ERROR: missing required MuseTalk model file: $f" >&2
+    exit 1
+  fi
+  echo "✓ $f"
+done
 
 step "Sanity check"
-"${PYTHON_BIN}" -c "import sys, pkg_resources, setuptools, torch, torchvision, torchaudio, cv2, numpy, matplotlib, openvoice, transformers, huggingface_hub, mmengine, mmcv, mmdet, mmpose; from mmcv.ops import nms; from mmpose.apis import inference_topdown, init_model; print('Python:', sys.version); print('setuptools:', setuptools.__version__); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available(), 'build:', torch.version.cuda); print('TorchVision:', torchvision.__version__); print('TorchAudio:', torchaudio.__version__); print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__); print('Matplotlib:', matplotlib.__version__); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__); print('MMEngine:', mmengine.__version__); print('MMCV:', mmcv.__version__, 'ops: OK'); print('MMDet:', mmdet.__version__); print('MMPose:', mmpose.__version__)"
+"${PYTHON_BIN}" -c "import sys, pkg_resources, setuptools, torch, torchvision, torchaudio, cv2, numpy, matplotlib, openvoice, transformers, huggingface_hub, diffusers, mmengine, mmcv, mmdet, mmpose; from mmcv.ops import nms; from mmpose.apis import inference_topdown, init_model; print('Python:', sys.version); print('setuptools:', setuptools.__version__); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available(), 'build:', torch.version.cuda); print('TorchVision:', torchvision.__version__); print('TorchAudio:', torchaudio.__version__); print('Diffusers:', diffusers.__version__); print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__); print('Matplotlib:', matplotlib.__version__); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__); print('MMEngine:', mmengine.__version__); print('MMCV:', mmcv.__version__, 'ops: OK'); print('MMDet:', mmdet.__version__); print('MMPose:', mmpose.__version__)"
 echo "Zaskaleta AI Twin GPU engines installed with ${PYTHON_BIN}."
