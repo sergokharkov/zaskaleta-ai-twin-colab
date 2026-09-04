@@ -43,6 +43,7 @@
       "micro head movement",
       "realistic shoulder and neck motion",
       "natural hand gestures",
+      "limit expressive gestures to one or two meaningful gestures per scene",
       "avoid robotic repetitive motion",
       "avoid exaggerated head sway or artificial zoom motion"
     ],
@@ -57,6 +58,8 @@
       "AI_CLONE always uses MASTER_VOICE",
       "secondary characters use separate voices",
       "key motivational lines belong to AI_CLONE",
+      "when speaking directly to viewer, eyes naturally meet the camera lens",
+      "during dialogue, eye line follows the other speaker rather than staring into camera",
       "use reverse-shot for multi-person dialogue when practical"
     ],
     "cinematography": [
@@ -64,8 +67,11 @@
       "35mm-style natural perspective",
       "realistic depth of field",
       "natural daylight or motivated practical lighting",
-      "consistent light direction and color temperature within one episode",
+      "consistent weather, time of day, light direction and color temperature across adjacent scenes",
+      "preserve spatial continuity and screen direction between neighboring shots",
+      "avoid extreme low-angle framing and ultra-wide facial distortion",
       "subtle handheld or dolly feeling rather than synthetic Ken Burns motion",
+      "leave clean lower-frame subtitle-safe space without covering mouth or important hand action",
       "no fantasy look unless explicitly scripted"
     ],
     "wardrobe": [
