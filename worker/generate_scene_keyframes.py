@@ -1,6 +1,8 @@
 import argparse
 import gc
 import json
+import os
+import time
 from pathlib import Path
 
 import torch
@@ -14,24 +16,55 @@ NEGATIVE = (
     "low quality, blurry, watermark, text"
 )
 
+# Colab/mobile connections can briefly interrupt large Hugging Face downloads.
+# Give the hub more time and let it resume/retry instead of killing the whole episode.
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "180")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
+
+
+def _retry_load(label, fn, attempts=4):
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except (OSError, ConnectionError, TimeoutError) as e:
+            last = e
+            if attempt >= attempts:
+                raise
+            wait = 8 * attempt
+            print(f"⚠️ {label}: transient download/cache error ({attempt}/{attempts}); retry in {wait}s")
+            print(f"   {type(e).__name__}: {str(e)[:220]}")
+            time.sleep(wait)
+    raise last
+
 
 def load_pipe():
     dtype = torch.float16
-    image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-        "h94/IP-Adapter", subfolder="models/image_encoder", torch_dtype=dtype
+    image_encoder = _retry_load(
+        "IP-Adapter image encoder",
+        lambda: CLIPVisionModelWithProjection.from_pretrained(
+            "h94/IP-Adapter", subfolder="models/image_encoder", torch_dtype=dtype
+        ),
     )
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        image_encoder=image_encoder,
-        torch_dtype=dtype,
-        variant="fp16",
-        use_safetensors=True,
+    pipe = _retry_load(
+        "SDXL base model",
+        lambda: StableDiffusionXLPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            image_encoder=image_encoder,
+            torch_dtype=dtype,
+            variant="fp16",
+            use_safetensors=True,
+        ),
     )
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-    pipe.load_ip_adapter(
-        "h94/IP-Adapter",
-        subfolder="sdxl_models",
-        weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
+    _retry_load(
+        "IP-Adapter face weights",
+        lambda: pipe.load_ip_adapter(
+            "h94/IP-Adapter",
+            subfolder="sdxl_models",
+            weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
+        ),
     )
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
