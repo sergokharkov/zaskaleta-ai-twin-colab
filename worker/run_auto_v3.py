@@ -77,7 +77,6 @@ def main():
         print('FINAL_PATH=' + str(final))
         return
 
-    # 1. Episode manifest: cheap, always refresh so content/outfit/dialogue fixes are picked up.
     run([
         python_bin, worker / 'prepare_daily_episode.py',
         '--plan', plan, '--day', day,
@@ -94,7 +93,6 @@ def main():
     print('🗣️ Dialogue:', 'YES' if episode.get('dialogue') else 'NO')
     print('🎭 REALISM LOCK: ON')
 
-    # 2. Dialogue audio.
     dialogue_dir = daydir / 'dialogue_audio'
     dm = dialogue_dir / 'dialogue_audio_manifest.json'
     if episode.get('dialogue') and not dm.is_file():
@@ -110,7 +108,6 @@ def main():
         dialogue_dir.mkdir(parents=True, exist_ok=True)
         print('↪ Dialogue audio stage: skip/resume')
 
-    # 3. Main-character speech.
     speech_dir = daydir / 'scene_speech'
     speech_manifest = speech_dir / 'scene_speech_manifest.json'
     if not speech_manifest.is_file():
@@ -124,20 +121,28 @@ def main():
     else:
         print('↪ Main speech stage: resume existing')
 
-    # 4. Identity-preserving keyframes.
+    # Render each SDXL keyframe in its own process. This fully frees CPU/GPU memory
+    # after every scene and preserves already completed files on Google Drive.
     keyframes = daydir / 'keyframes'
-    if count_files(keyframes, 'scene_*.png') < 8:
+    keyframes.mkdir(parents=True, exist_ok=True)
+    for scene_no in range(1, 9):
+        scene_file = keyframes / f'scene_{scene_no:02d}.png'
+        if scene_file.is_file() and scene_file.stat().st_size > 10_000:
+            print(f'↪ Scene {scene_no:02d}: existing keyframe, resume')
+            continue
+        print(f'🎨 Rendering Scene {scene_no:02d} in isolated process')
         run([
             python_bin, worker / 'generate_scene_keyframes.py',
             '--manifest', daydir / 'scene_prompts.json',
             '--photos', *photos,
             '--output-dir', keyframes,
             '--seed', '9969',
+            '--scene', scene_no,
         ])
-    else:
-        print('↪ Keyframes: 8 existing, resume')
+    if count_files(keyframes, 'scene_*.png') < 8:
+        raise RuntimeError(f'Only {count_files(keyframes, "scene_*.png")} of 8 keyframes exist after isolated rendering')
+    print('✅ Keyframes: 8/8 ready')
 
-    # 5. Camera motion.
     animated = daydir / 'animated'
     if count_files(animated, 'scene_*_silent.mp4') < 8:
         run([
@@ -149,7 +154,6 @@ def main():
     else:
         print('↪ Animation: 8 existing, resume')
 
-    # 6. Lip-sync / dialogue clips.
     if count_files(daydir, 'scene_??.mp4') < 8:
         run([
             python_bin, worker / 'render_scene_clips.py',
@@ -165,7 +169,6 @@ def main():
     else:
         print('↪ Scene render: 8 existing, resume')
 
-    # 7. Final assembly.
     run([
         python_bin, worker / 'assemble_daily_episode.py',
         '--episode-dir', daydir,
