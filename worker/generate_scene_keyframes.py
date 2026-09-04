@@ -32,9 +32,13 @@ def load_pipe():
         subfolder="sdxl_models",
         weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
     )
+
+    # Keep IP-Adapter attention processors intact. Calling enable_attention_slicing()
+    # after load_ip_adapter can replace/alter attention processors and produce
+    # `AttributeError: 'tuple' object has no attribute 'shape'` during inference.
+    # CPU offload and VAE slicing are safe memory-saving measures for Colab T4.
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
-    pipe.enable_attention_slicing()
     return pipe
 
 
