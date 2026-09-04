@@ -53,13 +53,17 @@ fi
 
 "${PYTHON_BIN}" -m pip install --upgrade "mmpose==1.1.0"
 
-step "Restore MuseTalk NumPy/OpenCV ABI"
-# OpenMMLab dependencies can pull NumPy 2.x, while MuseTalk/OpenCV wheels here
-# are built against NumPy 1.x. Re-pin to MuseTalk's tested ABI after MMPose.
+step "Restore MuseTalk NumPy/OpenCV/Matplotlib ABI"
+# OpenMMLab can pull NumPy 2.x and a very new Matplotlib. MuseTalk 1.5 pins
+# NumPy 1.23.5, so restore a mutually compatible scientific stack afterwards.
 "${PYTHON_BIN}" -m pip install --force-reinstall --no-cache-dir \
   "numpy==1.23.5" "opencv-python==4.9.0.80"
-"${PYTHON_BIN}" -c "import numpy, cv2; print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__)"
-"${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose; print('MMLab OK:', mmengine.__version__, mmcv.__version__, mmdet.__version__, mmpose.__version__)"
+# Install versions whose wheels support NumPy 1.23.5. --no-deps prevents pip
+# from upgrading NumPy again while repairing the Matplotlib dependency chain.
+"${PYTHON_BIN}" -m pip install --force-reinstall --no-deps \
+  "contourpy==1.1.1" "matplotlib==3.7.5"
+"${PYTHON_BIN}" -c "import numpy, cv2, matplotlib, contourpy; print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__); print('Matplotlib:', matplotlib.__version__); print('ContourPy:', contourpy.__version__)"
+"${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose; from mmpose.apis import inference_topdown, init_model; print('MMLab OK:', mmengine.__version__, mmcv.__version__, mmdet.__version__, mmpose.__version__)"
 
 step "OpenVoice package without legacy pins"
 if [ ! -d "${OPENVOICE_ROOT}/.git" ]; then
@@ -107,5 +111,5 @@ curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
   -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
 
 step "Sanity check"
-"${PYTHON_BIN}" -c "import sys, torch, cv2, numpy, openvoice, transformers, huggingface_hub, mmengine, mmcv, mmdet, mmpose; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__); print('MMEngine:', mmengine.__version__); print('MMCV:', mmcv.__version__); print('MMDet:', mmdet.__version__); print('MMPose:', mmpose.__version__)"
+"${PYTHON_BIN}" -c "import sys, torch, cv2, numpy, matplotlib, openvoice, transformers, huggingface_hub, mmengine, mmcv, mmdet, mmpose; from mmpose.apis import inference_topdown, init_model; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('NumPy:', numpy.__version__); print('OpenCV:', cv2.__version__); print('Matplotlib:', matplotlib.__version__); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__); print('MMEngine:', mmengine.__version__); print('MMCV:', mmcv.__version__); print('MMDet:', mmdet.__version__); print('MMPose:', mmpose.__version__)"
 echo "Zaskaleta AI Twin GPU engines installed with ${PYTHON_BIN}."
