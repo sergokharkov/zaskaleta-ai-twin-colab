@@ -5,8 +5,28 @@ APP_DIR="${APP_DIR:-/content/zaskaleta-ai-twin-colab/worker}"
 MUSETALK_ROOT="${MUSETALK_ROOT:-/content/MuseTalk}"
 VENV_DIR="${VENV_DIR:-/content/ai-twin-py311}"
 OPENVOICE_ROOT="${OPENVOICE_ROOT:-/content/OpenVoice}"
+PRIMARY_DRIVE="${PRIMARY_DRIVE:-/content/drive/MyDrive}"
 
 step() { echo; echo "========== $1 =========="; }
+
+# Fail before any apt/pip/model work if Colab mounted the wrong Google account.
+# The AI Twin source Drive must contain the master voice. This avoids wasting
+# several minutes reinstalling the GPU stack only to fail later in AUTO.
+step "Primary Drive preflight"
+if [ ! -d "${PRIMARY_DRIVE}" ]; then
+  echo "⛔ ОСНОВНИЙ GOOGLE DRIVE НЕ ПІДКЛЮЧЕНО: ${PRIMARY_DRIVE}" >&2
+  echo "Підключи основний акаунт, де лежать фото, голос і behavior videos, та запусти AUTO ще раз." >&2
+  exit 42
+fi
+MASTER_VOICE_FOUND="$(find "${PRIMARY_DRIVE}" -type f \( -iname 'Zaskaleta_AI_Voice_Master.mp3' -o -iname 'Zaskaleta_AI_Voice_Master.wav' -o -iname 'Zaskaleta_AI_Voice_Master.m4a' -o -iname 'Zaskaleta_AI_Voice_Master.flac' -o -iname 'Zaskaleta_AI_Voice_Master.aac' -o -iname 'Zaskaleta_AI_Voice_Master.ogg' \) -print -quit 2>/dev/null || true)"
+if [ -z "${MASTER_VOICE_FOUND}" ]; then
+  echo "⛔ НЕ ТОЙ ОСНОВНИЙ GOOGLE DRIVE" >&2
+  echo "Master voice Zaskaleta_AI_Voice_Master.* не знайдено під ${PRIMARY_DRIVE}." >&2
+  echo "Інсталятор НЕ запускаємо, щоб не витрачати час і GPU." >&2
+  echo "У Colab підключи акаунт, де збережені 6 master photos, master voice і behavior videos." >&2
+  exit 42
+fi
+echo "✅ Source assets preflight OK: ${MASTER_VOICE_FOUND}"
 
 step "System packages"
 apt-get update
@@ -28,8 +48,6 @@ export PATH="${VENV_DIR}/bin:${PATH}"
 "${PYTHON_BIN}" -c "import pkg_resources, setuptools; print('setuptools:', setuptools.__version__); print('pkg_resources: OK')"
 
 step "MuseTalk-compatible PyTorch stack"
-# Only reinstall the large CUDA wheels when the runtime does not already have
-# the required MuseTalk/OpenMMLab-compatible versions.
 if "${PYTHON_BIN}" - <<'PY'
 import sys
 try:
@@ -139,8 +157,6 @@ mkdir -p \
   "${MUSETALK_ROOT}/models/whisper"
 
 step "Download MuseTalk models"
-# Download each required filename explicitly. Do not combine positional
-# filenames with --include: the HF CLI ignores --include in that case.
 hf download TMElyralab/MuseTalk musetalkV15/musetalk.json \
   --local-dir "${MUSETALK_ROOT}/models"
 hf download TMElyralab/MuseTalk musetalkV15/unet.pth \
