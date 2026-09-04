@@ -1,7 +1,6 @@
 import argparse
 import json
 import mimetypes
-import os
 import re
 from pathlib import Path
 
@@ -15,8 +14,8 @@ def folder_id_from_value(value: str) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Upload completed AI Twin episode artifacts to a second Google Drive folder')
-    ap.add_argument('--folder', required=True, help='Second Drive folder URL or folder ID')
+    ap = argparse.ArgumentParser(description='Upload completed AI Twin episode artifacts to the fixed archive Google Drive folder')
+    ap.add_argument('--folder', required=True, help='Archive Drive folder URL or folder ID')
     ap.add_argument('--episode-dir', required=True)
     ap.add_argument('--final', required=True)
     ap.add_argument('--day', type=int, required=True)
@@ -26,14 +25,22 @@ def main():
     if not folder_id:
         raise RuntimeError('Archive folder ID is empty')
 
-    # This script is intended to run under the Colab system Python after
-    # google.colab.auth.authenticate_user() has authorized the archive account.
     import google.auth
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
-    creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive.file'])
+    creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive'])
     service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+    folder = service.files().get(
+        fileId=folder_id,
+        fields='id,name,mimeType,capabilities(canAddChildren)',
+        supportsAllDrives=True,
+    ).execute()
+    if folder.get('mimeType') != 'application/vnd.google-apps.folder':
+        raise RuntimeError('Archive ID is not a Google Drive folder')
+    if folder.get('capabilities', {}).get('canAddChildren') is False:
+        raise PermissionError('Current Google account has no write access to the fixed archive folder')
+    print(f"✅ Fixed archive folder accessible: {folder.get('name')} ({folder_id})")
 
     episode_dir = Path(args.episode_dir)
     final = Path(args.final)
@@ -52,17 +59,27 @@ def main():
     uploaded = []
     for p in files:
         mime = mimetypes.guess_type(p.name)[0] or 'application/octet-stream'
-        metadata = {
-            'name': f'Day_{args.day:02d}__{p.name}',
-            'parents': [folder_id],
-        }
-        media = MediaFileUpload(str(p), mimetype=mime, resumable=True)
-        created = service.files().create(
-            body=metadata,
-            media_body=media,
-            fields='id,name,size,md5Checksum,parents',
+        archive_name = f'Day_{args.day:02d}__{p.name}'
+        existing = service.files().list(
+            q=f"'{folder_id}' in parents and name='{archive_name.replace(chr(39), chr(92)+chr(39))}' and trashed=false",
+            fields='files(id,name,size)',
+            pageSize=10,
             supportsAllDrives=True,
-        ).execute()
+            includeItemsFromAllDrives=True,
+        ).execute().get('files', [])
+        media = MediaFileUpload(str(p), mimetype=mime, resumable=True)
+        if existing:
+            created = service.files().update(
+                fileId=existing[0]['id'], media_body=media,
+                fields='id,name,size,md5Checksum,parents', supportsAllDrives=True,
+            ).execute()
+        else:
+            created = service.files().create(
+                body={'name': archive_name, 'parents': [folder_id]},
+                media_body=media,
+                fields='id,name,size,md5Checksum,parents',
+                supportsAllDrives=True,
+            ).execute()
         uploaded.append(created)
         print(f"✅ Archive upload: {created.get('name')} ({created.get('id')})")
 
