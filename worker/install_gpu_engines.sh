@@ -43,6 +43,16 @@ step "MuseTalk OpenMMLab dependencies (Colab-safe)"
 "${PYTHON_BIN}" -m pip install --upgrade "mmengine>=0.8,<1.0"
 "${PYTHON_BIN}" -m pip install --upgrade "mmcv-lite==2.0.1"
 "${PYTHON_BIN}" -m pip install --upgrade "mmdet==3.1.0"
+
+# mmpose 1.1.0 depends on legacy chumpy 0.70. The PyPI sdist fails under modern
+# PEP-517 build isolation, so install a patched Git commit first without isolation.
+if ! "${PYTHON_BIN}" -m pip show chumpy >/dev/null 2>&1; then
+  "${PYTHON_BIN}" -m pip install --no-build-isolation \
+    "git+https://github.com/mattloper/chumpy.git@4228d703b622e172e843438fe0fada102979361a"
+fi
+
+# With chumpy already satisfied, mmpose can install normally without trying to
+# rebuild the broken PyPI chumpy source distribution.
 "${PYTHON_BIN}" -m pip install --upgrade "mmpose==1.1.0"
 "${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose; print('MMLab OK:', mmengine.__version__, mmcv.__version__, mmdet.__version__, mmpose.__version__)"
 
