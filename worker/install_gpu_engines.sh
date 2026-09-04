@@ -37,6 +37,15 @@ step "AI Twin runtime dependencies"
 "${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements.txt"
 "${PYTHON_BIN}" -m pip install -r "${APP_DIR}/requirements-gpu.txt"
 
+step "MuseTalk OpenMMLab dependencies"
+"${PYTHON_BIN}" -m pip install --no-cache-dir -U openmim
+if ! "${PYTHON_BIN}" -c "import mmengine, mmcv, mmdet, mmpose" >/dev/null 2>&1; then
+  "${VENV_DIR}/bin/mim" install mmengine
+  "${VENV_DIR}/bin/mim" install "mmcv==2.0.1"
+  "${VENV_DIR}/bin/mim" install "mmdet==3.1.0"
+  "${VENV_DIR}/bin/mim" install "mmpose==1.1.0"
+fi
+
 step "OpenVoice package without legacy pins"
 if [ ! -d "${OPENVOICE_ROOT}/.git" ]; then
   git clone --depth 1 https://github.com/myshell-ai/OpenVoice.git "${OPENVOICE_ROOT}"
@@ -83,5 +92,5 @@ curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
   -o "${MUSETALK_ROOT}/models/face-parse-bisent/resnet18-5c106cde.pth"
 
 step "Sanity check"
-"${PYTHON_BIN}" -c "import sys, torch, openvoice, transformers, huggingface_hub; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__)"
+"${PYTHON_BIN}" -c "import sys, torch, openvoice, transformers, huggingface_hub, mmengine, mmcv, mmdet, mmpose; print('Python:', sys.version); print('Torch:', torch.__version__, 'CUDA:', torch.cuda.is_available()); print('Transformers:', transformers.__version__); print('Hugging Face Hub:', huggingface_hub.__version__); print('MMEngine:', mmengine.__version__); print('MMCV:', mmcv.__version__); print('MMDet:', mmdet.__version__); print('MMPose:', mmpose.__version__)"
 echo "Zaskaleta AI Twin GPU engines installed with ${PYTHON_BIN}."
