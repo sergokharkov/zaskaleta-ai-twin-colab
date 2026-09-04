@@ -1,9 +1,11 @@
 import argparse
 import json
+import re
 from pathlib import Path
 
 
 PRIORITY_BEHAVIOR_NAME = 'MASTER_BEHAVIOR_01.mp4'
+MASTER_BEHAVIOR_GLOB = 'MASTER_BEHAVIOR_*.mp4'
 
 
 def candidate_roots(root: Path):
@@ -44,6 +46,23 @@ def find_voice(root: Path, preferred_name: str):
     return None
 
 
+def behavior_sort_key(path: Path):
+    m = re.search(r'MASTER_BEHAVIOR_(\d+)', path.stem, re.I)
+    return (int(m.group(1)) if m else 9999, path.name.casefold())
+
+
+def discover_master_behaviors(root: Path):
+    found = {}
+    for search_root in candidate_roots(root):
+        try:
+            for p in search_root.rglob(MASTER_BEHAVIOR_GLOB):
+                if p.is_file():
+                    found.setdefault(p.name.casefold(), p)
+        except OSError:
+            continue
+    return sorted(found.values(), key=behavior_sort_key)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--mydrive', default='/content/drive/MyDrive')
@@ -73,19 +92,26 @@ def main():
     videos = []
     seen = set()
 
-    # User-approved canonical behavior clip. Always place it first when available,
-    # regardless of whether the older static profile has been updated yet.
-    priority = find_unique(root, PRIORITY_BEHAVIOR_NAME)
-    if priority and priority.is_file():
+    # Persistent motion library. Any future MASTER_BEHAVIOR_03, 04... file placed in
+    # SOURCE is picked up automatically without another code change.
+    master_behaviors = discover_master_behaviors(root)
+    for i, p in enumerate(master_behaviors, start=1):
+        resolved = p.resolve()
         videos.append({
-            'path': str(priority),
-            'filename': PRIORITY_BEHAVIOR_NAME,
-            'role': 'PRIMARY_BEHAVIOR_REFERENCE',
-            'priority': 1,
-            'notes': 'User-approved real reference: natural posture, head motion, blinking and body rhythm.'
+            'path': str(p),
+            'filename': p.name,
+            'role': ['motion_profile', 'identity_consistent_behavior', 'natural_body_motion'],
+            'priority': i,
+            'verified': True,
+            'notes': 'User-approved real motion reference for the persistent clone.'
         })
-        seen.add(priority.resolve())
+        seen.add(resolved)
 
+    priority = next((p for p in master_behaviors if p.name == PRIORITY_BEHAVIOR_NAME), None)
+    if priority is None and master_behaviors:
+        priority = master_behaviors[0]
+
+    # Keep older verified behavior material as supporting references.
     for item in profile.get('behavior_videos', []):
         name = item['filename']
         p = base / name
@@ -103,6 +129,7 @@ def main():
         'master_voice': str(voice),
         'master_photos': photos[:6],
         'behavior_videos': videos,
+        'master_behavior_videos': [str(p) for p in master_behaviors],
         'primary_behavior': str(priority) if priority and priority.is_file() else None,
         'profile': profile,
     }
@@ -112,6 +139,9 @@ def main():
     print('VOICE:', voice.name)
     print('PHOTOS:', len(photos[:6]))
     print('VIDEOS:', len(videos))
+    print('🎬 MASTER MOTION REFERENCES:', len(master_behaviors))
+    for p in master_behaviors:
+        print('   •', p.name)
     if priority and priority.is_file():
         print('⭐ PRIMARY BEHAVIOR:', priority.name)
 
