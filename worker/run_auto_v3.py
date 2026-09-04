@@ -71,6 +71,7 @@ def main():
     ap.add_argument('--root', required=True)
     ap.add_argument('--mydrive', default='/content/drive/MyDrive')
     ap.add_argument('--day', type=int, default=None)
+    ap.add_argument('--sync-folder-id', default=None, help='Fixed Google Drive source folder ID used to persist checkpoints')
     args = ap.parse_args()
 
     root = Path(args.root)
@@ -81,6 +82,18 @@ def main():
     outfits = content / 'outfit_profiles.json'
     clone_profile = content / 'clone_reference_profile.json'
     python_bin = Path('/content/ai-twin-py311/bin/python')
+
+    def sync_progress():
+        if not args.sync_folder_id:
+            return
+        try:
+            run([
+                '/usr/bin/python3', worker / 'fixed_drive_folder_sync.py', 'push',
+                '--folder-id', args.sync_folder_id,
+                '--local-dir', args.mydrive,
+            ])
+        except Exception as e:
+            print('⚠️ Progress sync failed; local runtime continues:', e)
 
     asset_map = Path('/content/clone_assets_v3.json')
     run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', clone_profile, '--output', asset_map])
@@ -111,6 +124,7 @@ def main():
     print('💾 Resume state:', state_path)
     if valid_file(final, 100_000):
         mark(state_path, 'final', True, str(final))
+        sync_progress()
         print('✅ Final already exists:', final)
         print('FINAL_PATH=' + str(final))
         return
@@ -123,6 +137,7 @@ def main():
     else:
         run([python_bin, worker / 'prepare_daily_episode.py', '--plan', plan, '--day', day, '--output-dir', daydir, '--dialogues', dialogues, '--outfits', outfits, '--clone-profile', clone_profile])
         mark(state_path, 'episode_prepared')
+    sync_progress()
 
     episode = json.loads(episode_json.read_text(encoding='utf-8'))
     print('🎞️', episode.get('title'))
@@ -147,6 +162,7 @@ def main():
     else:
         print('↪ Main speech stage: resume existing')
     mark(state_path, 'scene_speech')
+    sync_progress()
 
     keyframes = daydir / 'keyframes'
     keyframes.mkdir(parents=True, exist_ok=True)
@@ -162,6 +178,7 @@ def main():
         raise RuntimeError('Not all 8 keyframes are ready')
     mark(state_path, 'keyframes_all')
     print('✅ Keyframes: 8/8 ready')
+    sync_progress()
 
     animated = daydir / 'animated'
     animated.mkdir(parents=True, exist_ok=True)
@@ -172,6 +189,7 @@ def main():
     if count_files(animated, 'scene_*_silent.mp4') < 8:
         raise RuntimeError('Not all 8 animated scenes are ready')
     mark(state_path, 'animation_all')
+    sync_progress()
 
     for scene_no in range(1, 9):
         scene_target = daydir / f'scene_{scene_no:02d}.mp4'
@@ -182,10 +200,12 @@ def main():
         print(f'🎭 Rendering Scene {scene_no:02d} final clip in isolated process')
         run([python_bin, worker / 'render_scene_clips.py', '--manifest', scene_prompts, '--keyframes', keyframes, '--scene-speech', speech_manifest, '--dialogue-audio-dir', dialogue_dir, '--animated-dir', animated, '--worker-dir', worker, '--python-bin', python_bin, '--output-dir', daydir, '--scene', str(scene_no)])
         mark(state_path, f'final_scene_{scene_no:02d}')
+        sync_progress()
     if count_files(daydir, 'scene_??.mp4') < 8:
         raise RuntimeError('Not all 8 final scene clips are ready')
     mark(state_path, 'scene_render_all')
     print('✅ Scene render: 8/8 ready')
+    sync_progress()
 
     if not valid_file(final, 100_000):
         run([python_bin, worker / 'assemble_daily_episode.py', '--episode-dir', daydir, '--output', final])
@@ -195,6 +215,7 @@ def main():
     if not valid_file(final, 100_000):
         raise RuntimeError('Final render did not appear')
     mark(state_path, 'final', True, str(final))
+    sync_progress()
     print('\n✅ READY:', final)
     print('FINAL_PATH=' + str(final))
 
