@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout)[-4000:])
+        raise RuntimeError(((r.stdout or '') + '\n' + (r.stderr or ''))[-6000:])
 
 
 def probe_duration(path: Path):
@@ -46,6 +46,7 @@ def main():
     ap.add_argument('--worker-dir', required=True)
     ap.add_argument('--python-bin', required=True)
     ap.add_argument('--output-dir', required=True)
+    ap.add_argument('--scene', type=int, default=None)
     args = ap.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
@@ -67,9 +68,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     worker = Path(args.worker_dir)
 
-    for scene in manifest['scenes']:
+    scenes = manifest['scenes']
+    if args.scene is not None:
+        scenes = [s for s in scenes if int(s['n']) == args.scene]
+        if not scenes:
+            raise SystemExit(f'Scene {args.scene} not found')
+
+    for scene in scenes:
         n = int(scene['n'])
         target = out / f'scene_{n:02d}.mp4'
+        if target.is_file() and target.stat().st_size > 50_000:
+            print(f'↪ Scene {n:02d}: existing final clip, resume')
+            continue
+
         image = keyframes / f'scene_{n:02d}.png'
         scene_dialogue = dialogue_by_scene.get(n, [])
 
@@ -110,7 +121,7 @@ def main():
             ])
             print(f'🎬 Scene {n:02d}: cinematic cutaway')
 
-    print('✅ All final scene clips ready')
+    print('✅ Requested scene clip(s) ready')
 
 
 if __name__ == '__main__':
