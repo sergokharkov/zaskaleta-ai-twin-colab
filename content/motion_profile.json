@@ -1,0 +1,40 @@
+{
+  "profile_name": "Zaskaleta Motion Profile v1",
+  "purpose": "Persistent motion/behavior library for the AI clone. Scene, background and wardrobe are intentionally excluded.",
+  "strategy": {
+    "identity_source": "MASTER_PHOTOS + canonical identity anchor",
+    "motion_source": "All MASTER_BEHAVIOR_*.mp4 files discovered in SOURCE",
+    "voice_source": "Zaskaleta_AI_Voice_Master.mp3",
+    "scene_independent": true,
+    "future_growth": "New approved motion clips named MASTER_BEHAVIOR_03.mp4, MASTER_BEHAVIOR_04.mp4, etc. are added automatically by the asset locator."
+  },
+  "current_master_motion_refs": [
+    {
+      "filename": "MASTER_BEHAVIOR_01.mp4",
+      "priority": 1,
+      "use_for": ["posture", "head_motion", "blinking", "body_rhythm", "talking_base"]
+    },
+    {
+      "filename": "MASTER_BEHAVIOR_02.mp4",
+      "priority": 2,
+      "use_for": ["additional_head_motion", "pose_variation", "natural_body_motion", "motion_diversity"]
+    }
+  ],
+  "motion_rules": [
+    "Preserve the same person; motion references never redefine identity.",
+    "Use natural blinking and eye saccades.",
+    "Use subtle breathing and shoulder/neck movement.",
+    "Avoid repetitive robotic head sway.",
+    "Use restrained, purposeful gestures.",
+    "Do not inherit the original reference background, bed, room, captions, watermark or wardrobe as clone identity.",
+    "Do not treat a source scene as part of the clone. Background and environment are external layers.",
+    "Talking motion must coordinate lips, jaw, cheeks, gaze and micro head motion with the active speech audio."
+  ],
+  "quality_gate": {
+    "identity_consistency": "required",
+    "natural_motion": "required",
+    "lip_sync": "required for talking",
+    "scene_dependency": "forbidden",
+    "background_copying": "forbidden"
+  }
+}
