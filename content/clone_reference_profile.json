@@ -4,6 +4,8 @@
   "drive_folder_url": "https://drive.google.com/drive/folders/13Wye5lVZPOcUryXbXhplad_FkxM7lG4a",
   "master_voice_filename": "Zaskaleta_AI_Voice_Master.mp3",
   "master_photo_count": 6,
+  "canonical_identity_photo": "MVIMG_20260830_144834.jpg",
+  "identity_strategy": "Use the canonical photo as the visual identity anchor for every generated scene. The remaining master photos are supporting references only and must never cause scene-to-scene face switching.",
   "photo_filenames": [
     "MVIMG_20260830_144834.jpg",
     "MVIMG_20260830_144843.jpg",
@@ -26,7 +28,8 @@
       "preserve beard shape, density and color",
       "preserve hairstyle, hairline and age",
       "preserve eye shape, nose, lips, jaw and skin tone",
-      "no beautification, no rejuvenation, no face reshaping"
+      "no beautification, no rejuvenation, no face reshaping",
+      "same recognizable person in every scene and every camera angle"
     ],
     "skin": [
       "natural pores and skin texture",
@@ -40,7 +43,8 @@
       "micro head movement",
       "realistic shoulder and neck motion",
       "natural hand gestures",
-      "avoid robotic repetitive motion"
+      "avoid robotic repetitive motion",
+      "avoid exaggerated head sway or artificial zoom motion"
     ],
     "hands": [
       "five fingers per hand",
@@ -60,6 +64,8 @@
       "35mm-style natural perspective",
       "realistic depth of field",
       "natural daylight or motivated practical lighting",
+      "consistent light direction and color temperature within one episode",
+      "subtle handheld or dolly feeling rather than synthetic Ken Burns motion",
       "no fantasy look unless explicitly scripted"
     ],
     "wardrobe": [
