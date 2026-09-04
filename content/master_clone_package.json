@@ -32,6 +32,8 @@
     },
     "motion": {
       "profile": "Zaskaleta Motion Profile v1",
+      "learning_profile": "content/motion_learning_profile_v1.json",
+      "learning_engine": "MMPose 1.1.0",
       "primary_reference": "MASTER_BEHAVIOR_01.mp4",
       "supporting_reference": "MASTER_BEHAVIOR_02.mp4",
       "auto_discovery_glob": "MASTER_BEHAVIOR_*.mp4",
@@ -43,7 +45,13 @@
         "subtle_gesture",
         "natural_blink",
         "breathing",
-        "shoulder_movement"
+        "shoulder_movement",
+        "walking",
+        "sitting",
+        "standing",
+        "hand_gesture",
+        "emotional_reaction",
+        "presentation_style"
       ],
       "extract_only": [
         "head movement",
@@ -55,7 +63,10 @@
         "body rhythm",
         "talking behavior",
         "posture",
-        "gesture rhythm"
+        "gesture rhythm",
+        "normalized body keypoints",
+        "relative joint trajectories",
+        "movement speed and timing"
       ],
       "ignore": [
         "background",
@@ -64,8 +75,16 @@
         "captions",
         "watermark",
         "scene",
-        "wardrobe as identity"
-      ]
+        "wardrobe as identity",
+        "source person's face identity",
+        "source person's voice"
+      ],
+      "learning_policy": {
+        "auto_training": false,
+        "manual_approval_required": true,
+        "identity_independent": true,
+        "approved_motion_only": true
+      }
     },
     "talking": {
       "engine": "MuseTalk 1.5",
@@ -108,7 +127,8 @@
       "real photos",
       "real videos",
       "real voice",
-      "manually approved good generations"
+      "manually approved good generations",
+      "manually approved identity-independent motion profiles"
     ],
     "rejected": [
       "face drift",
@@ -117,7 +137,8 @@
       "wrong mouth",
       "wrong jaw",
       "unnatural motion",
-      "wrong identity"
+      "wrong identity",
+      "ambiguous or low-confidence motion extraction"
     ],
     "rule": "Never auto-train on all generated outputs. Only APPROVED material may become future reference material."
   },
@@ -131,6 +152,9 @@
   "folder_layout": [
     "MASTER_CLONE/IDENTITY",
     "MASTER_CLONE/MOTION",
+    "MASTER_CLONE/MOTION/CANDIDATES",
+    "MASTER_CLONE/MOTION/APPROVED",
+    "MASTER_CLONE/MOTION/REJECTED",
     "MASTER_CLONE/TALKING",
     "MASTER_CLONE/VOICE",
     "MASTER_CLONE/APPROVED",
