@@ -42,39 +42,77 @@ def main():
 
     photo = pathlib.Path(args.photo).resolve()
     reference = pathlib.Path(args.reference_video).resolve() if args.reference_video else None
-    media = reference if reference and reference.exists() else photo
     audio = pathlib.Path(args.audio).resolve()
     output = pathlib.Path(args.output).resolve()
     job = output.parent
-    config = job / f'musetalk-task-{output.stem}.yaml'
-    results = job / 'musetalk-results'
-    results.mkdir(parents=True, exist_ok=True)
-    write_config(config, media, audio)
+    results_root = job / 'musetalk-results'
+    results_root.mkdir(parents=True, exist_ok=True)
+
+    if not photo.is_file():
+        raise FileNotFoundError(photo)
+    if not audio.is_file():
+        raise FileNotFoundError(audio)
+
+    media_candidates = []
+    if reference and reference.is_file():
+        media_candidates.append(('animated-reference', reference))
+    media_candidates.append(('keyframe-fallback', photo))
 
     model_dir = root / 'models' / 'musetalkV15'
-    cmd = [
-        sys.executable, '-m', 'scripts.inference',
-        '--inference_config', str(config),
-        '--result_dir', str(results),
-        '--unet_model_path', str(model_dir / 'unet.pth'),
-        '--unet_config', str(model_dir / 'musetalk.json'),
-        '--whisper_dir', str(root / 'models' / 'whisper'),
-        '--version', 'v15',
-        '--use_float16',
-        '--batch_size', '4',
-    ]
-    started = time.time()
-    result = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=3600)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or 'MuseTalk inference failed')[-6000:])
+    failures = []
 
-    rendered = newest_mp4(results, started)
-    if not rendered:
-        tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-6000:]
-        raise RuntimeError('MuseTalk finished but no MP4 was produced. Log tail:\n' + tail)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(rendered, output)
-    print(f'✅ MuseTalk output: {output}')
+    for attempt_no, (label, media) in enumerate(media_candidates, start=1):
+        attempt_results = results_root / f'{output.stem}-{attempt_no}'
+        if attempt_results.exists():
+            shutil.rmtree(attempt_results, ignore_errors=True)
+        attempt_results.mkdir(parents=True, exist_ok=True)
+
+        config = job / f'musetalk-task-{output.stem}-{attempt_no}.yaml'
+        write_config(config, media, audio)
+
+        cmd = [
+            sys.executable, '-m', 'scripts.inference',
+            '--inference_config', str(config),
+            '--result_dir', str(attempt_results),
+            '--unet_model_path', str(model_dir / 'unet.pth'),
+            '--unet_config', str(model_dir / 'musetalk.json'),
+            '--whisper_dir', str(root / 'models' / 'whisper'),
+            '--version', 'v15',
+            '--use_float16',
+            '--batch_size', '4',
+        ]
+
+        print(f'🎭 MuseTalk attempt {attempt_no}: {label} -> {media}')
+        started = time.time()
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=3600,
+            )
+        except Exception as exc:
+            failures.append(f'{label}: subprocess error: {exc}')
+            print(f'⚠️ {label} failed to start: {exc}')
+            continue
+
+        rendered = newest_mp4(attempt_results, started)
+        if result.returncode == 0 and rendered is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(rendered, output)
+            print(f'✅ MuseTalk output ({label}): {output}')
+            return
+
+        tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-7000:]
+        failures.append(f'{label}: returncode={result.returncode}\n{tail}')
+        print(f'⚠️ MuseTalk {label} did not produce MP4; trying fallback if available.')
+        print(tail[-2500:])
+
+    raise RuntimeError(
+        'MuseTalk failed for all media candidates. Log tail:\n' +
+        '\n\n===== NEXT ATTEMPT =====\n\n'.join(failures)[-12000:]
+    )
 
 
 if __name__ == '__main__':
