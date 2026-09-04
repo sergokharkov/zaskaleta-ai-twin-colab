@@ -7,14 +7,13 @@ from pathlib import Path
 
 def motion_filter(index: int, seconds: float, fps: int = 25):
     frames = max(1, int(seconds * fps))
-    # Alternate subtle push-in, pull-out and lateral drift to avoid repetitive shots.
     mode = (index - 1) % 4
     if mode == 0:
-        z = f"min(zoom+0.0008,1.08)"
+        z = "min(zoom+0.0008,1.08)"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
     elif mode == 1:
-        z = f"if(eq(on,1),1.08,max(zoom-0.0008,1.0))"
+        z = "if(eq(on,1),1.08,max(zoom-0.0008,1.0))"
         x = "iw/2-(iw/zoom/2)"
         y = "ih/2-(ih/zoom/2)"
     elif mode == 2:
@@ -26,11 +25,15 @@ def motion_filter(index: int, seconds: float, fps: int = 25):
         x = f"(iw-iw/zoom)*(1-on/{frames})"
         y = "ih/2-(ih/zoom/2)"
     return (
-        f"scale=1080:1920:force_original_aspect_ratio=increase,"
-        f"crop=1080:1920,"
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s=1080x1920:fps={fps},"
         "format=yuv420p"
     )
+
+
+def valid_video(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 50_000
 
 
 def main():
@@ -53,6 +56,9 @@ def main():
         if not src.is_file():
             raise FileNotFoundError(src)
         dest = out / f"scene_{n:02d}_silent.mp4"
+        if valid_video(dest):
+            print(f"↪ Animated scene {n:02d}: existing, resume")
+            continue
         vf = motion_filter(n, seconds, args.fps)
         cmd = [
             "ffmpeg", "-y", "-loop", "1", "-i", str(src), "-t", str(seconds),
