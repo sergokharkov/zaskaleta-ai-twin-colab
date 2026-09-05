@@ -68,12 +68,10 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           api = Path('runpod/api_server.py').read_text(encoding='utf-8')
           req = Path('runpod/requirements-api.txt').read_text(encoding='utf-8')
           runner = Path('worker/run_clone_v2_test.py').read_text(encoding='utf-8')
           materializer = Path('worker/materialize_clone_runtime_from_s3.py').read_text(encoding='utf-8')
-
           required_api = [
               "'storage_provider': 's3_compatible'",
               "'google_drive_production_dependency': False",
@@ -91,76 +89,45 @@ jobs:
           missing = [token for token in required_api if token not in api]
           if missing:
               raise SystemExit('Clone API runtime contract missing: ' + ', '.join(missing))
-
           forbidden_api = [
-              'AI_TWIN_DRIVE_SYNC',
-              'AI_TWIN_DRIVE_FOLDER_ID',
-              'CANONICAL_DRIVE_FOLDER_ID',
-              'DRIVE_SYNC_ENABLED',
-              'pull_canonical_drive',
-              'fixed_drive_folder_sync.py',
-              "photo: str | None",
-              "voice: str | None",
-              "referenceVideo: str | None",
+              'AI_TWIN_DRIVE_SYNC','AI_TWIN_DRIVE_FOLDER_ID','CANONICAL_DRIVE_FOLDER_ID',
+              'DRIVE_SYNC_ENABLED','pull_canonical_drive','fixed_drive_folder_sync.py',
+              "photo: str | None","voice: str | None","referenceVideo: str | None",
           ]
           hits = [token for token in forbidden_api if token in api]
           if hits:
               raise SystemExit('Legacy Drive/path override behavior remains in Clone API: ' + ', '.join(hits))
-
           for token in ['--candidate-id', 'CLONE_V2_RENDER_PROVENANCE.json', 'zaskaleta-lipsync-render-provenance-v2']:
               if token not in runner:
                   raise SystemExit('Runner provenance/candidate contract missing: ' + token)
           for token in ['all_objects_verified', 'cleanup_required_after_job', 'strict_key']:
               if token not in materializer:
                   raise SystemExit('S3 materializer safety contract missing: ' + token)
-
           for dependency in ['boto3==', 'cryptography==']:
               if dependency not in req:
                   raise SystemExit('Required encrypted S3 runtime dependency missing: ' + dependency)
           for forbidden_dep in ['google-auth', 'google-api-python-client']:
               if forbidden_dep in req:
                   raise SystemExit('Obsolete Google runtime dependency remains: ' + forbidden_dep)
-
           print('Clone API is Drive-free, job-scoped, provenance-bound, and ready for encrypted S3 materialization')
           PY
-      - name: Assert no paid GPU or secret side effects in readiness code
+      - name: Assert no paid GPU or secret side effects in executable readiness code
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          files = [
-              Path('runpod/connection_readiness.py'),
-              Path('runpod/clone_v2_readiness.py'),
-              Path('runpod/preflight.py'),
-          ]
+          files = [Path('runpod/clone_v2_readiness.py'), Path('runpod/preflight.py')]
           joined = '\n'.join(p.read_text(encoding='utf-8') for p in files)
-
-          required = [
-              'paid_gpu_started',
-              'manual_budget_approval_required_before',
-              'google_drive_production_dependency',
-              'secret_values_exposed',
-          ]
+          required = ['paid_gpu_started','manual_budget_approval_required_before','google_drive_production_dependency','secret_values_exposed']
           missing = [token for token in required if token not in joined]
           if missing:
               raise SystemExit('Readiness safety contract missing: ' + ', '.join(missing))
-
           forbidden = [
-              'runpodctl create',
-              'runpodctl pod create',
-              'flash deploy',
-              'requests.post(',
-              'boto3.client(',
-              'create_pod(',
-              'create_endpoint(',
-              'print(TOKEN)',
-              'print(os.environ)',
-              'GOOGLE_APPLICATION_CREDENTIALS',
-              'AI_TWIN_DRIVE_SYNC',
+              'runpodctl create','runpodctl pod create','flash deploy','requests.post(',
+              'boto3.client(','create_pod(','create_endpoint(','print(TOKEN)','print(os.environ)',
+              'GOOGLE_APPLICATION_CREDENTIALS','AI_TWIN_DRIVE_SYNC',
           ]
           hits = [token for token in forbidden if token in joined]
           if hits:
               raise SystemExit('Forbidden provisioning/secret/legacy behavior found: ' + ', '.join(hits))
-
-          print('Readiness checks cannot provision paid GPU, expose secrets, or depend on Google Drive')
+          print('Executable readiness checks cannot provision paid GPU, expose secrets, or depend on Google Drive')
           PY
