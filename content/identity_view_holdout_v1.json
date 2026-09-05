@@ -1,0 +1,50 @@
+{
+  "schema": "zaskaleta-identity-view-holdout-v1",
+  "purpose": "Define the mandatory multi-angle identity regression set for MASTER CLONE promotion without guessing camera angles from filenames.",
+  "canonical_identity_photo": "MVIMG_20260830_144834.jpg",
+  "candidate_supporting_photos": [
+    "MVIMG_20260830_144843.jpg",
+    "MVIMG_20260830_144606.jpg",
+    "MVIMG_20260830_144457.jpg",
+    "image-1788277947699.jpg",
+    "image-1788277957517.jpg"
+  ],
+  "required_views": [
+    "frontal",
+    "left_profile",
+    "right_profile",
+    "left_three_quarter",
+    "right_three_quarter"
+  ],
+  "view_assignments": {
+    "frontal": {"reference": null, "review_status": "UNASSIGNED"},
+    "left_profile": {"reference": null, "review_status": "UNASSIGNED"},
+    "right_profile": {"reference": null, "review_status": "UNASSIGNED"},
+    "left_three_quarter": {"reference": null, "review_status": "UNASSIGNED"},
+    "right_three_quarter": {"reference": null, "review_status": "UNASSIGNED"}
+  },
+  "rules": {
+    "manual_view_assignment_required": true,
+    "do_not_infer_view_from_filename": true,
+    "all_required_views_must_be_assigned_before_release": true,
+    "all_required_views_must_pass": true,
+    "identity_regression_tolerance": 0.0,
+    "manual_identity_override_allowed": false,
+    "stable_release_immutable": true,
+    "supporting_reference_must_come_from_approved_master_photo_set": true
+  },
+  "required_review_fields_per_view": [
+    "identity_similarity",
+    "identity_drift",
+    "face_structure_drift",
+    "age_regression",
+    "beard_regression",
+    "hairline_regression",
+    "jaw_regression",
+    "mouth_regression",
+    "asymmetry_loss",
+    "decision"
+  ],
+  "decision_values": ["PASS", "FAIL", "UNREVIEWED"],
+  "promotion_condition": "Every required view must be explicitly assigned to an approved reference and PASS with zero identity regression before manual promotion can be considered."
+}
