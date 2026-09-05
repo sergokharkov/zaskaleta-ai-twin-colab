@@ -3,6 +3,7 @@ import os
 import secrets
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -22,7 +23,7 @@ CORS_ORIGINS = [x.strip() for x in os.environ.get('AI_TWIN_CORS_ORIGINS', 'https
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.2.0')
+app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.3.0')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -33,17 +34,17 @@ app.add_middleware(
 
 
 class Profile(BaseModel):
-    name: str = 'Zaskaleta AI Clone'
-    language: str = 'uk'
+    name: str = Field(default='Zaskaleta AI Clone', max_length=120)
+    language: str = Field(default='uk', max_length=16)
 
 
 class RenderRequest(BaseModel):
     profile: Profile = Field(default_factory=Profile)
-    scene: str = ''
-    script: str
-    format: str = '9:16'
+    scene: str = Field(default='', max_length=2000)
+    script: str = Field(min_length=1, max_length=8000)
+    format: str = Field(default='9:16', pattern='^(9:16)$')
     voicePreset: str = 'conversational'
-    seconds: float = 12.0
+    seconds: float = Field(default=12.0, ge=8.0, le=15.0)
     photo: str | None = None
     voice: str | None = None
     referenceVideo: str | None = None
@@ -72,7 +73,11 @@ def write_state(job_id: str, **changes):
         except Exception:
             pass
     state.update(changes)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=folder, delete=False) as tmp:
+        json.dump(state, tmp, ensure_ascii=False, indent=2)
+        tmp.write('\n')
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
 
 
 def pull_canonical_drive(job_id: str):
@@ -99,7 +104,7 @@ def run_job(job_id: str, req: RenderRequest):
             str(APP_ROOT / 'worker' / 'run_clone_v2_test.py'),
             '--root', str(APP_ROOT),
             '--mydrive', str(STORAGE_ROOT),
-            '--seconds', str(max(8.0, min(15.0, req.seconds))),
+            '--seconds', str(req.seconds),
             '--voice-preset', req.voicePreset,
             '--text', req.script,
             '--output-dir', str(job_dir),
@@ -113,19 +118,32 @@ def run_job(job_id: str, req: RenderRequest):
             code = proc.wait()
         if code != 0:
             raise RuntimeError(f'Clone pipeline exited with code {code}')
+
         final = job_dir / 'CLONE_V2_TALKING_TEST.mp4'
         evaluation = job_dir / 'CLONE_V2_EVALUATION.json'
         if not final.is_file():
             raise RuntimeError('Final MP4 not found')
+        if not evaluation.is_file():
+            raise RuntimeError('Evaluation report not found; candidate cannot be released')
+
+        evaluation_data = json.loads(evaluation.read_text(encoding='utf-8'))
+        manual_review = evaluation_data.get('manual_review') or {}
+        manual_complete = bool(manual_review) and all(value is True for value in manual_review.values())
+        approved_for_next_gate = evaluation_data.get('approved_for_next_gate') is True and manual_complete
+
         write_state(
             job_id,
             status='completed',
-            stage='completed',
+            stage='manual_review_required' if not approved_for_next_gate else 'gate_approved',
             video_url=f'/output/{job_id}',
-            evaluation_url=f'/jobs/{job_id}/evaluation' if evaluation.exists() else None,
+            evaluation_url=f'/jobs/{job_id}/evaluation',
+            quality_status='PASS_MANUAL_GATE' if approved_for_next_gate else 'MANUAL_REVIEW_REQUIRED',
+            eligible_for_master=False,
+            automatic_master_promotion=False,
+            manual_review_required=not approved_for_next_gate,
         )
     except Exception as exc:
-        write_state(job_id, status='failed', stage='failed', error=str(exc))
+        write_state(job_id, status='failed', stage='failed', eligible_for_master=False, error=str(exc))
 
 
 @app.get('/health')
@@ -133,7 +151,7 @@ def health():
     return {
         'ok': True,
         'service': 'zaskaleta-ai-clone',
-        'version': '0.2.0',
+        'version': '0.3.0',
         'root_exists': APP_ROOT.exists(),
         'storage_exists': STORAGE_ROOT.exists(),
         'python': PYTHON_BIN,
@@ -142,6 +160,7 @@ def health():
         'canonical_drive_folder_configured': bool(CANONICAL_DRIVE_FOLDER_ID),
         'cors_origins': CORS_ORIGINS,
         'gpu_expected': True,
+        'automatic_master_promotion': False,
     }
 
 
@@ -153,9 +172,21 @@ def render(req: RenderRequest, background_tasks: BackgroundTasks, authorization:
     if req.voicePreset not in {'calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'}:
         raise HTTPException(status_code=400, detail='unsupported voicePreset')
     job_id = uuid.uuid4().hex
-    write_state(job_id, status='queued', stage='queued', request={'profile': req.profile.model_dump(), 'seconds': req.seconds, 'voicePreset': req.voicePreset, 'scene': req.scene})
+    write_state(
+        job_id,
+        status='queued',
+        stage='queued',
+        eligible_for_master=False,
+        automatic_master_promotion=False,
+        request={
+            'profile': req.profile.model_dump(),
+            'seconds': req.seconds,
+            'voicePreset': req.voicePreset,
+            'scene': req.scene,
+        },
+    )
     background_tasks.add_task(run_job, job_id, req)
-    return {'job_id': job_id, 'status': 'queued'}
+    return {'job_id': job_id, 'status': 'queued', 'eligible_for_master': False}
 
 
 @app.get('/jobs/{job_id}')
