@@ -6,6 +6,7 @@ on:
     paths:
       - 'kaggle/bootstrap.py'
       - 'kaggle/preflight.py'
+      - 'kaggle/prepare_models.py'
       - '.github/workflows/kaggle-bootstrap-qa.yml'
       - 'worker/lipsync_musetalk.py'
       - 'worker/generate_scene_speech.py'
@@ -17,6 +18,8 @@ on:
     paths:
       - 'kaggle/bootstrap.py'
       - 'kaggle/preflight.py'
+      - 'kaggle/prepare_models.py'
+      - 'worker/lipsync_musetalk.py'
       - '.github/workflows/kaggle-bootstrap-qa.yml'
 
 permissions:
@@ -33,7 +36,7 @@ jobs:
           python-version: '3.11'
       - name: Syntax check
         run: |
-          python -m py_compile kaggle/bootstrap.py kaggle/preflight.py
+          python -m py_compile kaggle/bootstrap.py kaggle/preflight.py kaggle/prepare_models.py worker/lipsync_musetalk.py
       - name: Assert one-command bootstrap contract
         run: |
           python - <<'PY'
@@ -47,6 +50,8 @@ jobs:
               'mmpose==1.1.0',
               'myshell-ai/OpenVoice.git',
               'TMElyralab/MuseTalk.git',
+              'accelerate==0.28.0',
+              'ffmpeg-python',
               'paid_gpu_started_by_bootstrap',
               'biometric_media_uploaded_by_bootstrap',
               'auto_promote',
@@ -55,6 +60,30 @@ jobs:
           if missing:
               raise SystemExit(f'Kaggle bootstrap contract weakened: {missing}')
           print('Bootstrap contract present')
+          PY
+      - name: Assert model preparation contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('kaggle/prepare_models.py').read_text(encoding='utf-8')
+          required = [
+              'TMElyralab/MuseTalk',
+              'musetalkV15/unet.pth',
+              'openai/whisper-tiny',
+              'stabilityai/sd-vae-ft-mse',
+              'yzd-v/DWPose',
+              'ByteDance/LatentSync',
+              'myshell-ai/OpenVoiceV2',
+              '--verify-only',
+              'all_required_public_models_verified',
+              'private_biometric_media_touched',
+              'render_started',
+              'auto_promote',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Model preparation contract weakened: {missing}')
+          print('Model preparation contract present')
           PY
       - name: Assert fail-closed preflight contract
         run: |
@@ -75,6 +104,25 @@ jobs:
               raise SystemExit(f'Kaggle preflight contract weakened: {missing}')
           print('Preflight contract present')
           PY
+      - name: Assert portable MuseTalk runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('worker/lipsync_musetalk.py').read_text(encoding='utf-8')
+          required = [
+              'runtime_temp_parent',
+              'ZASKALETA_TMP_ROOT',
+              '/kaggle/working/zaskaleta_tmp',
+              'Required MuseTalk 1.5 model files are missing',
+              'approved_motion_reference_required',
+              'photo_fallback_allowed',
+              'auto_promote',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Portable MuseTalk runtime contract weakened: {missing}')
+          print('Portable MuseTalk runtime contract present')
+          PY
       - name: Reject dangerous side effects
         run: |
           python - <<'PY'
@@ -82,6 +130,8 @@ jobs:
           text = '\n'.join([
               Path('kaggle/bootstrap.py').read_text(encoding='utf-8'),
               Path('kaggle/preflight.py').read_text(encoding='utf-8'),
+              Path('kaggle/prepare_models.py').read_text(encoding='utf-8'),
+              Path('worker/lipsync_musetalk.py').read_text(encoding='utf-8'),
           ])
           forbidden = [
               'runpodctl create',
@@ -97,5 +147,5 @@ jobs:
           bad = [x for x in forbidden if x in text]
           if bad:
               raise SystemExit(f'Dangerous Kaggle side effect detected: {bad}')
-          print('No paid provisioning, upload, promotion, or remote mutation side effects')
+          print('No paid provisioning, biometric upload, promotion, or remote mutation side effects')
           PY
