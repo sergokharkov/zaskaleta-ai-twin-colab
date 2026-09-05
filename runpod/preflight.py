@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Non-destructive preflight checks for the Zaskaleta AI Clone RunPod API.
 
-This script never prints secret values. It validates only configuration presence,
-required repository files, writable storage, and clone quality/integrity assets.
-Exit code 0 means the host is structurally ready to start the API; GPU model
-installation and paid RunPod capacity are intentionally outside this check.
+This script never prints secret values, never provisions GPU resources, and never promotes a clone.
+It validates repository readiness, storage, security-sensitive runtime configuration, and the static
+Clone v2 safety contract required before the first paid 8-15 second GPU test is even considered.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -25,18 +25,34 @@ CORS = [x.strip() for x in os.environ.get("AI_TWIN_CORS_ORIGINS", "https://ai.za
 REQUIRED_FILES = [
     "runpod/api_server.py",
     "runpod/requirements-api.txt",
+    "runpod/clone_v2_readiness.py",
     "worker/run_clone_v2_test.py",
+    "worker/lipsync_musetalk.py",
+    "worker/generate_scene_speech.py",
     "worker/evaluate_clone_release.py",
-    "worker/build_master_clone_package.py",
-    "worker/extract_motion_profile.py",
-    "worker/validate_motion_candidate.py",
+    "worker/evaluate_identity_view_results.py",
+    "worker/compare_clone_challenger.py",
+    "worker/validate_clone_promotion_bundle.py",
+    "worker/validate_clone_duration_progression.py",
+    "worker/validate_clone_v2_temporal_output.py",
     "content/master_clone_package.json",
     "content/clone_quality_gate_v1.json",
+    "content/clone_release_policy_v1.json",
+    "content/render_face_guard_v1.json",
+    "content/talking_temporal_guard_v1.json",
+    "content/identity_view_holdout_v1.json",
+    "content/clone_promotion_bundle_policy_v1.json",
+    "content/clone_duration_gate_policy_v1.json",
+    "content/storage_config.json",
 ]
 
 
 def result(name: str, ok: bool, detail: str) -> dict:
     return {"check": name, "ok": bool(ok), "detail": detail}
+
+
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -51,12 +67,33 @@ def main() -> int:
     gate_detail = "missing"
     if gate_path.is_file():
         try:
-            gate = json.loads(gate_path.read_text(encoding="utf-8"))
-            gate_ok = isinstance(gate, dict) and bool(gate)
-            gate_detail = "valid JSON object" if gate_ok else "empty/invalid structure"
+            gate = load_json(gate_path)
+            gate_ok = (
+                isinstance(gate, dict)
+                and bool(gate)
+                and gate.get("manual_approval_required") is True
+                and gate.get("auto_promote_to_master") is False
+            )
+            gate_detail = "valid and manual-promotion locked" if gate_ok else "invalid or promotion policy weakened"
         except Exception as exc:
             gate_detail = f"invalid JSON: {type(exc).__name__}"
     checks.append(result("quality_gate", gate_ok, gate_detail))
+
+    release_ok = False
+    release_detail = "missing"
+    release_path = ROOT / "content/clone_release_policy_v1.json"
+    if release_path.is_file():
+        try:
+            release = load_json(release_path)
+            release_ok = (
+                float(release.get("identity_regression_tolerance", 1)) == 0.0
+                and release.get("manual_promotion_required") is True
+                and release.get("auto_promote") is False
+            )
+            release_detail = "zero identity regression and manual promotion enforced" if release_ok else "release policy weakened"
+        except Exception as exc:
+            release_detail = f"invalid JSON: {type(exc).__name__}"
+    checks.append(result("release_identity_policy", release_ok, release_detail))
 
     token_ok = len(TOKEN) >= 24
     checks.append(result("api_token", token_ok, "configured" if token_ok else "missing or too short (minimum 24 chars)"))
@@ -82,11 +119,39 @@ def main() -> int:
         storage_detail = f"not writable: {type(exc).__name__}"
     checks.append(result("storage_writable", storage_ok, storage_detail))
 
+    readiness_ok = False
+    readiness_detail = "clone_v2_readiness.py missing"
+    readiness_script = ROOT / "runpod/clone_v2_readiness.py"
+    if readiness_script.is_file():
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(readiness_script)],
+                cwd=str(ROOT),
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            parsed = json.loads(proc.stdout) if proc.stdout.strip() else {}
+            readiness_ok = (
+                proc.returncode == 0
+                and parsed.get("ready_for_paid_gpu_consideration") is True
+                and parsed.get("paid_gpu_started") is False
+                and parsed.get("manual_budget_approval_required_before_gpu_start") is True
+                and parsed.get("first_test_gate_seconds") == [8, 15]
+            )
+            readiness_detail = "static Clone v2 readiness PASS; no GPU started" if readiness_ok else "static Clone v2 readiness failed or safety contract changed"
+        except Exception as exc:
+            readiness_detail = f"readiness check error: {type(exc).__name__}"
+    checks.append(result("clone_v2_static_readiness", readiness_ok, readiness_detail))
+
     failed = [item for item in checks if not item["ok"]]
     report = {
         "service": "zaskaleta-ai-clone",
         "preflight": "pass" if not failed else "fail",
         "paid_gpu_started": False,
+        "manual_budget_approval_required_before_gpu_start": True,
+        "first_test_gate_seconds": [8, 15],
         "checks": checks,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
