@@ -22,6 +22,11 @@
     },
     "temporal_face_guard": {
       "required_passed": true
+    },
+    "render_provenance": {
+      "required_decision": "PASS_RENDER_PROVENANCE",
+      "photo_fallback_used": false,
+      "auto_promote": false
     }
   },
   "required_identity_views": [
@@ -37,6 +42,11 @@
     "candidate_id_must_match_across_artifacts_when_present": true,
     "any_identity_failure_blocks_promotion": true,
     "any_temporal_guard_failure_blocks_promotion": true,
+    "any_render_provenance_failure_blocks_promotion": true,
+    "render_output_sha256_must_be_verified": true,
+    "speech_audio_sha256_must_be_bound_to_render": true,
+    "canonical_identity_sha256_must_be_bound_to_render": true,
+    "approved_motion_sha256_must_be_bound_to_render": true,
     "manual_override_for_identity_forbidden": true,
     "promotion_never_occurs_in_validator": true
   },
