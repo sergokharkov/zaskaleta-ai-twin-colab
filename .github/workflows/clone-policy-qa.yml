@@ -13,6 +13,7 @@ on:
       - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
       - 'worker/validate_identity_view_holdout.py'
+      - 'worker/evaluate_identity_view_results.py'
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
@@ -29,6 +30,7 @@ on:
       - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
       - 'worker/validate_identity_view_holdout.py'
+      - 'worker/evaluate_identity_view_results.py'
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
@@ -88,6 +90,29 @@ jobs:
           assert lifecycle.get('holdout_regression_set') is True
 
           print('Clone policy invariants OK: zero identity regression, multi-angle holdout, immutable stable release, manual promotion only')
+          PY
+      - name: Enforce identity view evaluator invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('worker/evaluate_identity_view_results.py').read_text(encoding='utf-8')
+          required = [
+              "identity_drift > 0.0",
+              "face_structure_drift",
+              "age_regression",
+              "beard_regression",
+              "hairline_regression",
+              "jaw_regression",
+              "mouth_regression",
+              "asymmetry_loss",
+              "manual_override_allowed': False",
+              "PASS_TO_MANUAL_PROMOTION_REVIEW",
+              "BLOCK_PROMOTION",
+          ]
+          missing = [token for token in required if token not in source]
+          if missing:
+              raise SystemExit('Identity view evaluator weakened or incomplete: ' + ', '.join(missing))
+          print('Identity view evaluator enforces zero-regression blocking across all required angles')
           PY
       - name: Enforce render policy at runtime
         run: |
@@ -170,6 +195,7 @@ jobs:
           python -m py_compile \
             worker/validate_candidate_registry.py \
             worker/validate_identity_view_holdout.py \
+            worker/evaluate_identity_view_results.py \
             worker/evaluate_clone_release.py \
             worker/compare_clone_challenger.py \
             worker/generate_scene_keyframes.py \
