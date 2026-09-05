@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -10,6 +11,14 @@ def run(cmd):
     cmd = [str(x) for x in cmd]
     print('▶', ' '.join(cmd))
     subprocess.run(cmd, check=True)
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def probe_duration(path: Path) -> float:
@@ -30,10 +39,6 @@ def clamp_tempo(audio_duration: float, target_duration: float, max_correction: f
 
 
 def resolve_python() -> Path:
-    """Use an explicitly configured Python on RunPod/servers, otherwise current interpreter.
-
-    Legacy Colab can still set AI_TWIN_PYTHON=/content/ai-twin-py311/bin/python.
-    """
     configured = os.environ.get('AI_TWIN_PYTHON', '').strip()
     return Path(configured) if configured else Path(sys.executable)
 
@@ -52,7 +57,8 @@ def main():
     worker = root / 'worker'
     content = root / 'content'
     python_bin = resolve_python()
-    profile = content / 'clone_reference_profile.json'
+    profile_path = content / 'clone_reference_profile.json'
+    profile_doc = json.loads(profile_path.read_text(encoding='utf-8'))
     talking_profile = json.loads((content / 'talking_profile_v2.json').read_text(encoding='utf-8'))
 
     out = Path(args.output_dir).resolve() if args.output_dir else Path(args.mydrive).resolve() / 'clone_v2_tests'
@@ -63,7 +69,7 @@ def main():
     print(f'💾 Storage: {Path(args.mydrive).resolve()}')
 
     asset_map = out / 'clone_assets_v2.json'
-    run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile, '--output', asset_map])
+    run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile_path, '--output', asset_map])
     assets = json.loads(asset_map.read_text(encoding='utf-8'))
 
     behavior = assets.get('primary_behavior')
@@ -83,12 +89,42 @@ def main():
     print(f'🎞️ Clone v2 gate: source={source_duration:.2f}s test={seconds:.2f}s preset={args.voice_preset}')
 
     master_voice = Path(assets['master_voice'])
-    photos = [Path(p) for p in assets.get('master_photos', [])]
+    if not master_voice.is_file():
+        raise SystemExit('Configured master voice is missing')
+
+    photos = [Path(p) for p in assets.get('master_photos', []) if Path(p).is_file()]
     if not photos:
         raise SystemExit('No master photo available')
 
-    canonical_name = assets.get('profile', {}).get('canonical_identity_photo')
-    canonical = next((p for p in photos if p.name == canonical_name), photos[0])
+    expected_canonical = profile_doc.get('identity', {}).get('canonical_photo') or profile_doc.get('canonical_identity_photo')
+    located_canonical = assets.get('profile', {}).get('canonical_identity_photo')
+    canonical_name = expected_canonical or located_canonical
+    if not canonical_name:
+        raise SystemExit('Canonical identity photo is not explicitly configured; refusing fallback identity')
+    if expected_canonical and located_canonical and expected_canonical != located_canonical:
+        raise SystemExit(f'Canonical identity mismatch: profile={expected_canonical!r} assets={located_canonical!r}')
+
+    canonical_matches = [p for p in photos if p.name == canonical_name]
+    if len(canonical_matches) != 1:
+        raise SystemExit(f'Canonical identity must resolve to exactly one approved photo: {canonical_name!r}; matches={len(canonical_matches)}')
+    canonical = canonical_matches[0]
+
+    canonical_sha = sha256_file(canonical)
+    voice_sha = sha256_file(master_voice)
+    behavior_sha = sha256_file(behavior)
+    identity_preflight = {
+        'schema': 'zaskaleta-clone-v2-identity-preflight-v1',
+        'canonical_identity': canonical.name,
+        'canonical_identity_sha256': canonical_sha,
+        'master_voice': master_voice.name,
+        'master_voice_sha256': voice_sha,
+        'reference_behavior': behavior.name,
+        'reference_behavior_sha256': behavior_sha,
+        'fallback_identity_allowed': False,
+        'status': 'PASS',
+    }
+    (out / 'CLONE_V2_IDENTITY_PREFLIGHT.json').write_text(json.dumps(identity_preflight, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(f'🔒 Canonical identity locked: {canonical.name} sha256={canonical_sha[:12]}…')
 
     ref_video = out / 'clone_v2_behavior_gate.mp4'
     run([
@@ -144,7 +180,10 @@ def main():
         'clone_version': 'v2',
         'talking_profile': talking_profile['name'],
         'reference_behavior': behavior.name,
+        'reference_behavior_sha256': behavior_sha,
         'canonical_identity': canonical.name,
+        'canonical_identity_sha256': canonical_sha,
+        'master_voice_sha256': voice_sha,
         'voice_preset': args.voice_preset,
         'requested_duration': seconds,
         'final_duration': final_duration,
