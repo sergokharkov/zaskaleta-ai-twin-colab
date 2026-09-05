@@ -3,8 +3,10 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import cv2
@@ -44,6 +46,13 @@ def clamp_tempo(audio_duration: float, target_duration: float, max_correction: f
 def resolve_python() -> Path:
     configured = os.environ.get('AI_TWIN_PYTHON', '').strip()
     return Path(configured) if configured else Path(sys.executable)
+
+
+def normalize_candidate_id(value: str) -> str:
+    candidate_id = value.strip() or uuid.uuid4().hex
+    if len(candidate_id) > 80 or not re.fullmatch(r'[A-Za-z0-9._-]+', candidate_id):
+        raise SystemExit('candidate-id must contain only letters, digits, dot, underscore or dash and be <=80 chars')
+    return candidate_id
 
 
 def temporal_face_guard(video_path: Path, policy: dict) -> dict:
@@ -183,13 +192,15 @@ def temporal_face_guard(video_path: Path, policy: dict) -> dict:
 def main():
     ap = argparse.ArgumentParser(description='Clone v2 talking realism test with gated duration and aligned lipsync audio')
     ap.add_argument('--root', required=True)
-    ap.add_argument('--mydrive', required=True, help='Storage root. Can be Google Drive mount, RunPod volume, or synchronized workspace.')
+    ap.add_argument('--mydrive', required=True, help='Local runtime storage root materialized from approved canonical storage.')
     ap.add_argument('--seconds', type=float, default=12.0)
     ap.add_argument('--voice-preset', default='conversational', choices=['calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'])
     ap.add_argument('--text', default='Я говорю спокійно і природно. Кожна пауза має виглядати так, ніби слова справді вимовляю я. Без поспіху, без зайвих рухів, просто жива розмова.')
     ap.add_argument('--output-dir', default=None)
+    ap.add_argument('--candidate-id', default='', help='Stable candidate identifier. Generated locally when omitted.')
     args = ap.parse_args()
 
+    candidate_id = normalize_candidate_id(args.candidate_id)
     root = Path(args.root).resolve()
     worker = root / 'worker'
     content = root / 'content'
@@ -206,6 +217,7 @@ def main():
     print(f'🐍 Python: {python_bin}')
     print(f'📦 Root: {root}')
     print(f'💾 Storage: {Path(args.mydrive).resolve()}')
+    print(f'🧬 Candidate: {candidate_id}')
 
     asset_map = out / 'clone_assets_v2.json'
     run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile_path, '--output', asset_map])
@@ -253,7 +265,8 @@ def main():
     behavior_sha = sha256_file(behavior)
     temporal_policy_sha = sha256_file(temporal_policy_path)
     identity_preflight = {
-        'schema': 'zaskaleta-clone-v2-identity-preflight-v1',
+        'schema': 'zaskaleta-clone-v2-identity-preflight-v2',
+        'candidate_id': candidate_id,
         'canonical_identity': canonical.name,
         'canonical_identity_sha256': canonical_sha,
         'master_voice': master_voice.name,
@@ -265,7 +278,8 @@ def main():
         'fallback_identity_allowed': False,
         'status': 'PASS',
     }
-    (out / 'CLONE_V2_IDENTITY_PREFLIGHT.json').write_text(json.dumps(identity_preflight, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    identity_preflight_path = out / 'CLONE_V2_IDENTITY_PREFLIGHT.json'
+    identity_preflight_path.write_text(json.dumps(identity_preflight, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'🔒 Canonical identity locked: {canonical.name} sha256={canonical_sha[:12]}…')
 
     ref_video = out / 'clone_v2_behavior_gate.mp4'
@@ -306,19 +320,78 @@ def main():
     run(['ffmpeg', '-y', '-loglevel', 'error', '-i', audio, '-af', f'atempo={tempo:.6f},apad=pad_dur={seconds:.3f}', '-t', f'{seconds:.3f}', '-ar', '16000', '-ac', '1', lipsync_audio])
 
     raw = out / 'CLONE_V2_TALKING_RAW.mp4'
-    run([python_bin, worker / 'lipsync_musetalk.py', '--photo', fallback_photo, '--reference-video', ref_video, '--audio', lipsync_audio, '--output', raw])
+    raw_provenance_path = out / 'CLONE_V2_RAW_RENDER_PROVENANCE.json'
+    run([
+        python_bin, worker / 'lipsync_musetalk.py',
+        '--photo', fallback_photo,
+        '--reference-video', ref_video,
+        '--audio', lipsync_audio,
+        '--output', raw,
+        '--candidate-id', candidate_id,
+        '--provenance-output', raw_provenance_path,
+    ])
 
     if not raw.is_file() or raw.stat().st_size < 50_000:
         raise RuntimeError('Clone v2 MuseTalk render did not produce a valid MP4')
+    raw_provenance = json.loads(raw_provenance_path.read_text(encoding='utf-8'))
+    if raw_provenance.get('candidate_id') != candidate_id:
+        raise RuntimeError('Raw render provenance candidate_id mismatch')
+    raw_output = raw_provenance.get('output') or {}
+    if raw_output.get('sha256') != sha256_file(raw):
+        raise RuntimeError('Raw render provenance hash mismatch before postprocess')
 
     final = out / 'CLONE_V2_TALKING_TEST.mp4'
-    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', raw, '-vf', 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final])
+    final_filter = 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,format=yuv420p'
+    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', raw, '-vf', final_filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final])
 
     final_duration = probe_duration(final)
     if final_duration < seconds - 0.35:
         raise RuntimeError(f'Clone v2 duration gate failed: {final_duration:.2f}s vs requested {seconds:.2f}s')
 
+    final_provenance_path = out / 'CLONE_V2_RENDER_PROVENANCE.json'
+    final_provenance = {
+        'schema': 'zaskaleta-lipsync-render-provenance-v2',
+        'candidate_id': candidate_id,
+        'engine': raw_provenance.get('engine'),
+        'engine_version': raw_provenance.get('engine_version'),
+        'render_mode': raw_provenance.get('render_mode'),
+        'batch_size': raw_provenance.get('batch_size'),
+        'photo_fallback_allowed': raw_provenance.get('photo_fallback_allowed'),
+        'photo_fallback_used': raw_provenance.get('photo_fallback_used'),
+        'approved_motion_reference_required': True,
+        'source_hashes': raw_provenance.get('source_hashes'),
+        'raw_output': {
+            'path': str(raw),
+            'sha256': sha256_file(raw),
+            'size_bytes': raw.stat().st_size,
+        },
+        'postprocess': {
+            'tool': 'ffmpeg',
+            'video_filter': final_filter,
+            'audio_codec': 'aac',
+            'final_container': 'mp4',
+        },
+        'output': {
+            'path': str(final),
+            'sha256': sha256_file(final),
+            'size_bytes': final.stat().st_size,
+        },
+        'identity_preflight_sha256': sha256_file(identity_preflight_path),
+        'provenance_complete': True,
+        'auto_promote': False,
+    }
+    final_provenance_path.write_text(json.dumps(final_provenance, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+    render_provenance_evaluation_path = out / 'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json'
+    run([
+        python_bin, worker / 'validate_lipsync_render_provenance.py',
+        '--provenance', final_provenance_path,
+        '--output-file', render_provenance_evaluation_path,
+    ])
+
     temporal_guard = temporal_face_guard(final, temporal_policy)
+    temporal_guard['candidate_id'] = candidate_id
+    temporal_guard['final_render_sha256'] = sha256_file(final)
     temporal_guard_path = out / 'CLONE_V2_TEMPORAL_FACE_GUARD.json'
     temporal_guard_path.write_text(json.dumps(temporal_guard, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     if not temporal_guard.get('passed'):
@@ -328,6 +401,8 @@ def main():
         )
 
     evaluation = {
+        'schema': 'zaskaleta-clone-v2-evaluation-v2',
+        'candidate_id': candidate_id,
         'clone_version': 'v2',
         'talking_profile': talking_profile['name'],
         'reference_behavior': behavior.name,
@@ -338,8 +413,14 @@ def main():
         'voice_preset': args.voice_preset,
         'requested_duration': seconds,
         'final_duration': final_duration,
+        'final_render_sha256': sha256_file(final),
         'speech_duration_before_alignment': audio_duration,
         'tempo_correction': tempo,
+        'render_provenance': {
+            'path': final_provenance_path.name,
+            'evaluation_path': render_provenance_evaluation_path.name,
+            'sha256': sha256_file(final_provenance_path),
+        },
         'temporal_face_guard': {
             'path': temporal_guard_path.name,
             'policy': temporal_policy_path.name,
@@ -353,14 +434,17 @@ def main():
         'must_pass': talking_profile['test_gate']['must_pass'],
         'manual_review': {item: None for item in talking_profile['test_gate']['must_pass']},
         'approved_for_next_gate': False,
+        'automatic_master_promotion': False,
         'notes': 'Set every manual_review item to true before promoting this output to APPROVED or moving to the 15-30s gate. Temporal guard is policy-driven and structural only; it never replaces identity review.'
     }
     eval_path = out / 'CLONE_V2_EVALUATION.json'
-    eval_path.write_text(json.dumps(evaluation, ensure_ascii=False, indent=2), encoding='utf-8')
+    eval_path.write_text(json.dumps(evaluation, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
     print('\n✅ CLONE V2 TALKING TEST READY')
+    print('CANDIDATE_ID=' + candidate_id)
     print('FINAL_PATH=' + str(final))
     print('EVALUATION_PATH=' + str(eval_path))
+    print('RENDER_PROVENANCE_PATH=' + str(final_provenance_path))
     print('TEMPORAL_FACE_GUARD_PATH=' + str(temporal_guard_path))
     print(f'DURATION={final_duration:.2f}')
     print('⚠️ Do not add this generation to APPROVED until every manual gate is reviewed.')
