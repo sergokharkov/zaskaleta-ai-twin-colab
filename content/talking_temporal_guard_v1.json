@@ -1,0 +1,24 @@
+{
+  "schema": "zaskaleta-clone-v2-talking-temporal-guard-v1",
+  "sample_count": 9,
+  "minimum_pass_ratio": 0.89,
+  "max_face_count": 1,
+  "minimum_face_sharpness": 16.0,
+  "minimum_face_area_ratio": 0.008,
+  "maximum_face_area_ratio": 0.36,
+  "maximum_normalized_center_jump": 0.30,
+  "maximum_adjacent_area_ratio_multiplier": 2.20,
+  "require_single_face": true,
+  "require_temporal_geometry_stability": true,
+  "identity_policy": {
+    "identity_regression_tolerance": 0.0,
+    "structural_guard_is_not_identity_recognition": true,
+    "manual_identity_review_required": true,
+    "stable_vs_challenger_identity_gate_required": true
+  },
+  "notes": [
+    "This guard is for the short Clone v2 talking gate and is intentionally conservative about sudden face-box jumps.",
+    "It does not determine who the person is and must not replace identity similarity evaluation.",
+    "A failure blocks progression to the next duration gate but never modifies the stable MASTER CLONE."
+  ]
+}
