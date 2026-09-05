@@ -30,7 +30,7 @@ ACTIVE_JOB_ID: str | None = None
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.7.0')
+app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.8.0')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -152,12 +152,41 @@ def state_path(job_id: str) -> Path:
     return OUTPUT_ROOT / job_id / 'job.json'
 
 
+def persist_job_state(job_id: str) -> None:
+    path = state_path(job_id)
+    if not path.is_file():
+        raise RuntimeError('Local job state missing')
+    subprocess.run([
+        PYTHON_BIN, str(APP_ROOT / 'worker' / 'clone_job_state_store.py'), 'persist',
+        '--candidate-id', job_id, '--state-file', str(path),
+    ], check=True, env=os.environ.copy(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def restore_job_state(job_id: str) -> Path:
+    path = state_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        PYTHON_BIN, str(APP_ROOT / 'worker' / 'clone_job_state_store.py'), 'restore',
+        '--candidate-id', job_id, '--output', str(path),
+    ], check=True, env=os.environ.copy(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return path
+
+
 def read_state(job_id: str) -> dict:
     validate_job_id(job_id)
     path = state_path(job_id)
     if not path.exists():
-        raise HTTPException(status_code=404, detail='Job not found')
-    return json.loads(path.read_text(encoding='utf-8'))
+        try:
+            path = restore_job_state(job_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail='Job not found')
+    try:
+        state = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        raise HTTPException(status_code=503, detail='Job state is unavailable')
+    if state.get('job_id') != job_id:
+        raise HTTPException(status_code=503, detail='Job state integrity check failed')
+    return state
 
 
 def write_state(job_id: str, **changes):
@@ -309,6 +338,7 @@ def run_job(job_id: str, req: RenderRequest):
         runtime_cleaned = not runtime_assets.exists()
         job_plaintext_cleaned = cleanup_job_plaintext(job_dir, keep_state=True)
         write_state(job_id, plaintext_runtime_cleaned=runtime_cleaned, plaintext_job_artifacts_cleaned=job_plaintext_cleaned)
+        persist_job_state(job_id)
     except Exception as exc:
         shutil.rmtree(runtime_assets, ignore_errors=True)
         cleanup_ok = cleanup_job_plaintext(job_dir, keep_state=True)
@@ -317,6 +347,10 @@ def run_job(job_id: str, req: RenderRequest):
             error_code=type(exc).__name__, error='Clone job failed before release eligibility.',
             plaintext_runtime_cleaned=True, plaintext_job_artifacts_cleaned=cleanup_ok,
         )
+        try:
+            persist_job_state(job_id)
+        except Exception:
+            pass
     finally:
         release_render_slot(job_id)
 
@@ -325,13 +359,14 @@ def run_job(job_id: str, req: RenderRequest):
 def health():
     storage_contract_valid, _ = load_storage_contract(); configured = storage_env_status()
     return {
-        'ok': True, 'service': 'zaskaleta-ai-clone', 'version': '0.7.0',
+        'ok': True, 'service': 'zaskaleta-ai-clone', 'version': '0.8.0',
         'root_exists': APP_ROOT.exists(), 'storage_exists': STORAGE_ROOT.exists(),
         'storage_provider': 's3_compatible', 'storage_contract_valid': storage_contract_valid,
         'storage_credentials_complete': bool(configured) and all(configured.values()),
         'storage_runtime_ready': storage_runtime_ready(), 'job_scoped_plaintext_materialization': True,
-        'encrypted_job_artifact_persistence': True, 'plaintext_cleanup_required': True,
-        'max_concurrent_render_jobs_per_worker': 1, 'worker_busy': active_job_snapshot() is not None,
+        'encrypted_job_artifact_persistence': True, 'encrypted_job_state_recovery': True,
+        'plaintext_cleanup_required': True, 'max_concurrent_render_jobs_per_worker': 1,
+        'worker_busy': active_job_snapshot() is not None,
         'google_drive_production_dependency': False, 'python': PYTHON_BIN, 'auth_configured': bool(API_TOKEN),
         'cors_origins': CORS_ORIGINS, 'gpu_expected': True, 'automatic_master_promotion': False,
         'secret_values_exposed': False,
@@ -349,10 +384,12 @@ def render(req: RenderRequest, background_tasks: BackgroundTasks, authorization:
         raise HTTPException(status_code=429, detail='GPU worker is busy; retry after the active render finishes')
     try:
         write_state(job_id, status='queued', stage='queued', eligible_for_master=False, automatic_master_promotion=False, artifacts_persisted_encrypted=False, plaintext_runtime_cleaned=False, plaintext_job_artifacts_cleaned=False, request={'profile': req.profile.model_dump(), 'seconds': req.seconds, 'voicePreset': req.voicePreset, 'scene': req.scene})
+        persist_job_state(job_id)
         background_tasks.add_task(run_job, job_id, req)
     except Exception:
         release_render_slot(job_id)
-        raise
+        cleanup_job_plaintext(OUTPUT_ROOT / job_id, keep_state=False)
+        raise HTTPException(status_code=503, detail='Unable to persist encrypted initial job state')
     return {'job_id': job_id, 'status': 'queued', 'eligible_for_master': False}
 
 
