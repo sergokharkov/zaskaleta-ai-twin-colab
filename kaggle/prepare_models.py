@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Prepare public model weights for MASTER CLONE on Kaggle.
+"""Prepare or verify public model weights for MASTER CLONE on Kaggle.
 
 Downloads only public model checkpoints needed by MuseTalk 1.5 and OpenVoice V2.
 Does not touch private biometric media, does not render, and does not promote any clone.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -50,41 +51,66 @@ def download_hf(repo_id: str, filename: str, local_dir: Path) -> Path:
     return Path(path)
 
 
+def expected_musetalk_paths() -> list[tuple[Path, int]]:
+    return [
+        (MODELS / "musetalkV15" / "musetalk.json", 100),
+        (MODELS / "musetalkV15" / "unet.pth", 1024 * 1024),
+        (MODELS / "sd-vae" / "config.json", 100),
+        (MODELS / "sd-vae" / "diffusion_pytorch_model.bin", 1024 * 1024),
+        (MODELS / "whisper" / "config.json", 100),
+        (MODELS / "whisper" / "pytorch_model.bin", 1024 * 1024),
+        (MODELS / "whisper" / "preprocessor_config.json", 100),
+        (MODELS / "dwpose" / "dw-ll_ucoco_384.pth", 1024 * 1024),
+        (MODELS / "syncnet" / "latentsync_syncnet.pt", 1024 * 1024),
+        (MODELS / "face-parse-bisent" / "79999_iter.pth", 1024 * 1024),
+        (MODELS / "face-parse-bisent" / "resnet18-5c106cde.pth", 1024 * 1024),
+    ]
+
+
+def expected_openvoice_paths() -> list[tuple[Path, int]]:
+    ckpt = OPENVOICE / "checkpoints_v2"
+    return [
+        (ckpt / "converter" / "config.json", 100),
+        (ckpt / "converter" / "checkpoint.pth", 1024 * 1024),
+    ]
+
+
+def verify_existing() -> tuple[list[dict], list[dict]]:
+    muse = [require_file(path, min_bytes=min_bytes) for path, min_bytes in expected_musetalk_paths()]
+    voice = [require_file(path, min_bytes=min_bytes) for path, min_bytes in expected_openvoice_paths()]
+    return muse, voice
+
+
 def prepare_musetalk() -> list[dict]:
     if not (MUSETALK / "scripts" / "inference.py").is_file():
         raise RuntimeError(f"MuseTalk repository missing at {MUSETALK}")
 
-    files: list[dict] = []
-    files.append(require_file(download_hf("TMElyralab/MuseTalk", "musetalkV15/musetalk.json", MODELS), min_bytes=100))
-    files.append(require_file(download_hf("TMElyralab/MuseTalk", "musetalkV15/unet.pth", MODELS), min_bytes=1024 * 1024))
-
-    files.append(require_file(download_hf("stabilityai/sd-vae-ft-mse", "config.json", MODELS / "sd-vae"), min_bytes=100))
-    files.append(require_file(download_hf("stabilityai/sd-vae-ft-mse", "diffusion_pytorch_model.bin", MODELS / "sd-vae"), min_bytes=1024 * 1024))
+    download_hf("TMElyralab/MuseTalk", "musetalkV15/musetalk.json", MODELS)
+    download_hf("TMElyralab/MuseTalk", "musetalkV15/unet.pth", MODELS)
+    download_hf("stabilityai/sd-vae-ft-mse", "config.json", MODELS / "sd-vae")
+    download_hf("stabilityai/sd-vae-ft-mse", "diffusion_pytorch_model.bin", MODELS / "sd-vae")
 
     for name in ("config.json", "pytorch_model.bin", "preprocessor_config.json"):
-        min_bytes = 1024 * 1024 if name.endswith(".bin") else 100
-        files.append(require_file(download_hf("openai/whisper-tiny", name, MODELS / "whisper"), min_bytes=min_bytes))
+        download_hf("openai/whisper-tiny", name, MODELS / "whisper")
 
-    files.append(require_file(download_hf("yzd-v/DWPose", "dw-ll_ucoco_384.pth", MODELS / "dwpose"), min_bytes=1024 * 1024))
-    files.append(require_file(download_hf("ByteDance/LatentSync", "latentsync_syncnet.pt", MODELS / "syncnet"), min_bytes=1024 * 1024))
+    download_hf("yzd-v/DWPose", "dw-ll_ucoco_384.pth", MODELS / "dwpose")
+    download_hf("ByteDance/LatentSync", "latentsync_syncnet.pt", MODELS / "syncnet")
 
     face_dir = MODELS / "face-parse-bisent"
     face_dir.mkdir(parents=True, exist_ok=True)
     resnet = face_dir / "resnet18-5c106cde.pth"
     if not resnet.is_file() or resnet.stat().st_size < 1024 * 1024:
         run(["curl", "-fL", "https://download.pytorch.org/models/resnet18-5c106cde.pth", "-o", str(resnet)])
-    files.append(require_file(resnet, min_bytes=1024 * 1024))
 
     face_parse = face_dir / "79999_iter.pth"
     if not face_parse.is_file() or face_parse.stat().st_size < 1024 * 1024:
-        py = shutil.which("python") or sys.executable
         try:
             import gdown  # noqa: F401
         except Exception:
-            run([py, "-m", "pip", "install", "-q", "gdown"])
-        run([py, "-m", "gdown", "--id", "154JgKpzCPW82qINcVieuPH3fZ2e0P812", "-O", str(face_parse)])
-    files.append(require_file(face_parse, min_bytes=1024 * 1024))
-    return files
+            run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
+        run([sys.executable, "-m", "gdown", "--id", "154JgKpzCPW82qINcVieuPH3fZ2e0P812", "-O", str(face_parse)])
+
+    return [require_file(path, min_bytes=min_bytes) for path, min_bytes in expected_musetalk_paths()]
 
 
 def prepare_openvoice() -> list[dict]:
@@ -96,26 +122,39 @@ def prepare_openvoice() -> list[dict]:
         allow_patterns=["converter/config.json", "converter/checkpoint.pth"],
         local_dir=str(ckpt),
     )
-    return [
-        require_file(ckpt / "converter" / "config.json", min_bytes=100),
-        require_file(ckpt / "converter" / "checkpoint.pth", min_bytes=1024 * 1024),
-    ]
+    return [require_file(path, min_bytes=min_bytes) for path, min_bytes in expected_openvoice_paths()]
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description="Prepare public MASTER CLONE model weights")
+    ap.add_argument("--verify-only", action="store_true", help="Verify existing public weights without network downloads")
+    args = ap.parse_args()
+
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg is required but was not found in PATH")
 
-    muse = prepare_musetalk()
-    voice = prepare_openvoice()
+    if not (MUSETALK / "scripts" / "inference.py").is_file():
+        raise RuntimeError(f"MuseTalk repository missing at {MUSETALK}")
+    if not (OPENVOICE / "openvoice" / "api.py").is_file():
+        raise RuntimeError(f"OpenVoice repository missing at {OPENVOICE}")
+
+    if args.verify_only:
+        muse, voice = verify_existing()
+    else:
+        muse = prepare_musetalk()
+        voice = prepare_openvoice()
+
     report = {
         "schema": "zaskaleta-kaggle-model-prepare-v1",
+        "mode": "verify_only" if args.verify_only else "download_and_verify",
         "musetalk_root": str(MUSETALK),
         "openvoice_root": str(OPENVOICE),
         "ffmpeg": ffmpeg,
         "musetalk_files": muse,
         "openvoice_files": voice,
+        "required_public_model_files": len(muse) + len(voice),
+        "all_required_public_models_verified": True,
         "private_biometric_media_touched": False,
         "render_started": False,
         "auto_promote": False,
