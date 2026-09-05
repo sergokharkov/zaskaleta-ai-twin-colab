@@ -13,6 +13,8 @@
     "region_env": "AI_TWIN_STORAGE_REGION",
     "access_key_env": "AI_TWIN_STORAGE_ACCESS_KEY_ID",
     "secret_key_env": "AI_TWIN_STORAGE_SECRET_ACCESS_KEY",
+    "migration_manifest_key": "MASTER_CLONE/MEMORY/storage_migration_manifest_v1.json",
+    "job_artifact_prefix": "MASTER_CLONE/TESTS/JOBS",
     "layout": [
       "MASTER_CLONE/IDENTITY",
       "MASTER_CLONE/MOTION",
@@ -81,7 +83,9 @@
     "local_mount": "/workspace/zaskaleta-storage",
     "storage_credentials": "server-side environment variables only",
     "temporary_worker_cache_allowed": true,
+    "job_scoped_plaintext_materialization_required": true,
     "delete_temporary_plaintext_after_job": true,
+    "runtime_attestation_required": true,
     "never_commit_credentials": true,
     "never_commit_private_biometric_media": true
   }
