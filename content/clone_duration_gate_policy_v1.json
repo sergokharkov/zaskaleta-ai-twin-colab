@@ -1,0 +1,30 @@
+{
+  "schema": "zaskaleta-clone-duration-gate-policy-v1",
+  "purpose": "Prevent MASTER CLONE tests from increasing duration before the previous duration gate has passed all required quality and identity checks.",
+  "ordered_gates": [
+    {"id": "gate_08_15", "min_seconds": 8, "max_seconds": 15},
+    {"id": "gate_15_30", "min_seconds": 15, "max_seconds": 30},
+    {"id": "gate_30_45", "min_seconds": 30, "max_seconds": 45},
+    {"id": "gate_45_60", "min_seconds": 45, "max_seconds": 60},
+    {"id": "gate_60_90", "min_seconds": 60, "max_seconds": 90}
+  ],
+  "rules": {
+    "start_at_first_gate": true,
+    "sequential_only": true,
+    "skip_gate_allowed": false,
+    "manual_override_allowed": false,
+    "previous_gate_must_pass": true,
+    "identity_regression_tolerance": 0.0,
+    "stable_release_must_remain_immutable": true,
+    "manual_promotion_required": true
+  },
+  "required_previous_gate_evidence": [
+    "clone_quality_decision_pass",
+    "identity_view_evaluation_pass",
+    "temporal_face_guard_pass",
+    "challenger_comparison_pass",
+    "promotion_bundle_pass",
+    "manual_review_complete"
+  ],
+  "promotion_rule": "A longer duration gate may be attempted only after the immediately preceding gate has complete passing evidence. Any identity regression, failed temporal check, incomplete manual review, or missing evidence blocks progression."
+}
