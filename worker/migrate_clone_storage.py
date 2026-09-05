@@ -6,6 +6,8 @@ and never performs cutover. Actual upload requires --execute plus complete runti
 credentials. Private assets are encrypted client-side with streaming AES-256-GCM.
 Destination verification downloads the encrypted object, decrypts it locally, and
 compares the decrypted SHA-256 and byte length with the source before marking success.
+When and only when all objects verify, the non-secret migration manifest is published
+at the canonical manifest key so a job-scoped runtime can materialize verified assets.
 """
 
 from __future__ import annotations
@@ -193,6 +195,8 @@ def main() -> int:
             "verified_decrypted_size_bytes": None,
         })
 
+    client = None
+    bucket = None
     if args.execute:
         client = s3_client(storage)
         bucket = os.environ[env_map["bucket"]]
@@ -258,12 +262,16 @@ def main() -> int:
                         os.remove(tmp_path)
 
     complete = bool(objects) and all(o["verify_status"] == "VERIFIED_DECRYPTED_SHA256" for o in objects) if args.execute else False
+    manifest_key = (storage.get("canonical_storage") or {}).get("migration_manifest_key")
+    if not isinstance(manifest_key, str) or not manifest_key:
+        raise SystemExit("canonical migration_manifest_key is not configured")
     manifest = {
         "schema": "zaskaleta-storage-migration-manifest-v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "mode": "EXECUTE" if args.execute else "DRY_RUN",
         "source_provider": "google_drive_or_mounted_source",
         "destination_provider": "s3_compatible",
+        "canonical_manifest_key": manifest_key,
         "source_deleted": False,
         "cutover_performed": False,
         "manual_cutover_required": True,
@@ -276,12 +284,32 @@ def main() -> int:
         "note": "Cutover is intentionally separate. Source data is never deleted automatically; migration completes only after downloaded ciphertext decrypts to the exact source SHA-256 and size."
     }
     manifest_out.parent.mkdir(parents=True, exist_ok=True)
-    manifest_out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_bytes = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    manifest_out.write_bytes(manifest_bytes)
+
+    manifest_uploaded = False
+    if args.execute and complete:
+        manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+        client.put_object(
+            Bucket=bucket,
+            Key=manifest_key,
+            Body=manifest_bytes,
+            ContentType="application/json",
+            Metadata={"manifest-sha256": manifest_sha, "secret-values-exposed": "false"},
+        )
+        head = client.head_object(Bucket=bucket, Key=manifest_key)
+        metadata = head.get("Metadata") or {}
+        if metadata.get("manifest-sha256") != manifest_sha or int(head.get("ContentLength", -1)) != len(manifest_bytes):
+            raise RuntimeError("Canonical migration manifest upload verification failed")
+        manifest_uploaded = True
+
     print(json.dumps({
         "mode": manifest["mode"],
         "object_count": manifest["object_count"],
         "migration_complete": manifest["migration_complete"],
         "destination_verified_after_decryption": manifest["destination_verified_after_decryption"],
+        "canonical_manifest_uploaded": manifest_uploaded,
+        "canonical_manifest_key": manifest_key,
         "source_deleted": False,
         "cutover_performed": False,
         "secret_values_exposed": False,
