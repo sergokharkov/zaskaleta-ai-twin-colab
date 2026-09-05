@@ -1,0 +1,100 @@
+{
+  "schema": "zaskaleta-clone-external-connection-plan-v1",
+  "scope": "MASTER_CLONE_ONLY",
+  "status": "READY_TO_CONFIGURE_EXTERNAL_INFRASTRUCTURE",
+  "external_connection_performed": false,
+  "paid_gpu_started": false,
+  "first_gpu_gate_seconds": [8, 15],
+  "manual_budget_approval_required_before_paid_gpu": true,
+  "secrets_must_use_provider_secret_manager_or_runtime_env": true,
+  "secrets_must_not_be_committed_or_pasted_into_repository": true,
+  "ordered_phases": [
+    {
+      "phase": 1,
+      "name": "s3_eu_storage",
+      "requirements": [
+        "S3-compatible bucket in EU region",
+        "versioning enabled",
+        "client-side AES-256-GCM encryption key kept separately from objects",
+        "least-privilege storage credentials",
+        "second independent encrypted backup configured before production cutover"
+      ],
+      "automatic_paid_action_allowed": false
+    },
+    {
+      "phase": 2,
+      "name": "verified_canonical_migration",
+      "requirements": [
+        "read-only source",
+        "strict 32-byte base64 AES-256 key",
+        "downloaded ciphertext decrypts to exact source SHA-256 and byte size",
+        "canonical migration manifest uploaded only after all objects verify",
+        "no automatic source deletion",
+        "manual storage cutover"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "runtime_secrets_and_preflight",
+      "requirements": [
+        "AI_TWIN_STORAGE_BUCKET",
+        "AI_TWIN_STORAGE_ENDPOINT",
+        "AI_TWIN_STORAGE_REGION",
+        "AI_TWIN_STORAGE_ACCESS_KEY_ID",
+        "AI_TWIN_STORAGE_SECRET_ACCESS_KEY",
+        "AI_TWIN_DATA_ENCRYPTION_KEY",
+        "AI_TWIN_TOKEN",
+        "runpod/connection_readiness.py --require-runtime-env passes before API startup"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "api_runtime",
+      "requirements": [
+        "Drive-free S3 runtime",
+        "job-scoped verified materialization",
+        "one active render per GPU worker",
+        "candidate_id bound across evidence",
+        "final render provenance verified",
+        "encrypted artifact persistence and restore",
+        "encrypted job-state recovery",
+        "temporary plaintext cleanup"
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "first_paid_gpu_test",
+      "requirements": [
+        "explicit user budget cap approval",
+        "first render limited to 8-15 seconds",
+        "no automatic MASTER CLONE promotion",
+        "manual quality and identity review after automated gates"
+      ],
+      "automatic_paid_action_allowed": false
+    },
+    {
+      "phase": 6,
+      "name": "post_connection_acceptance",
+      "requirements": [
+        "S3 connectivity proven",
+        "encrypted canonical restore proven",
+        "encrypted job artifact restore proven",
+        "job state recovery proven",
+        "runtime plaintext cleanup proven",
+        "render provenance PASS",
+        "temporal guard PASS",
+        "identity and quality gates PASS",
+        "manual review complete before duration progression"
+      ]
+    }
+  ],
+  "forbidden_shortcuts": [
+    "Google Drive as production dependency",
+    "raw biometric media in GitHub",
+    "secret values in GitHub or logs",
+    "automatic stable clone overwrite",
+    "automatic MASTER CLONE promotion",
+    "skipping duration gates",
+    "paid GPU start without explicit budget approval"
+  ]
+}
