@@ -97,12 +97,41 @@ def main():
             prefix = "identity_regression" if key in identity else "metric_regression"
             failures.append(f"{prefix}:{key}")
 
+    # Face identity has a stricter, non-overridable policy than all other metrics.
+    candidate_flags = set(candidate.get("flags") or []) | set(evaluation.get("hard_fail_flags_detected") or [])
+    forbidden_identity_flags = set(policy.get("required_identity_flags_absent") or [])
+    for flag in sorted(candidate_flags & forbidden_identity_flags):
+        failures.append(f"face_regression_flag:{flag}")
+
+    face_policy = policy.get("face_regression_policy") or {}
+    if face_policy.get("canonical_identity_anchor_required"):
+        refs = candidate.get("references") or {}
+        if not refs.get("canonical_identity_anchor"):
+            failures.append("missing_canonical_identity_anchor")
+
+    if face_policy.get("supporting_identity_references_required"):
+        refs = candidate.get("references") or {}
+        support = refs.get("supporting_identity_references") or refs.get("supporting_refs") or []
+        if not isinstance(support, list) or not support:
+            failures.append("missing_supporting_identity_references")
+
+    if face_policy.get("all_identity_views_must_pass"):
+        required_views = face_policy.get("required_views") or []
+        view_metrics = candidate.get("identity_views") or {}
+        for view in required_views:
+            data = view_metrics.get(view)
+            if not isinstance(data, dict):
+                failures.append(f"missing_identity_view:{view}")
+                continue
+            if data.get("passed") is not True:
+                failures.append(f"identity_view_failed:{view}")
+
     if candidate.get("references", {}).get("all_approved") is not True:
         failures.append("candidate_references_not_fully_approved")
 
     decision = policy["promotion_decision"] if not failures else policy["blocked_decision"]
     report = {
-        "schema": "zaskaleta-clone-challenger-comparison-v1",
+        "schema": "zaskaleta-clone-challenger-comparison-v2",
         "compared_at": datetime.now(timezone.utc).isoformat(),
         "candidate_id": candidate_id,
         "stable_release_id": stable_id,
@@ -111,6 +140,12 @@ def main():
         "auto_promote": False,
         "comparisons": comparisons,
         "failures": failures,
+        "face_identity_lock": {
+            "strict_zero_regression": True,
+            "manual_override_allowed": False,
+            "required_views": (policy.get("face_regression_policy") or {}).get("required_views", []),
+            "detected_identity_flags": sorted(candidate_flags & forbidden_identity_flags),
+        },
         "provenance": {
             "candidate_metrics_sha256": sha256_file(candidate_path),
             "stable_metrics_sha256": sha256_file(stable_path),
@@ -121,6 +156,7 @@ def main():
             "stable_release_immutable": True,
             "rollback_must_remain_available": True,
             "identity_regression_blocks_promotion": True,
+            "identity_regression_manual_override": False,
             "human_review_still_required": True,
         },
     }
