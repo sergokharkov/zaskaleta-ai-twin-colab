@@ -1,0 +1,43 @@
+name: Clone Release Ledger QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/clone_release_ledger_v1.json'
+      - 'worker/validate_clone_release_ledger.py'
+      - '.github/workflows/clone-release-ledger-qa.yml'
+  pull_request:
+    paths:
+      - 'content/clone_release_ledger_v1.json'
+      - 'worker/validate_clone_release_ledger.py'
+      - '.github/workflows/clone-release-ledger-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  release-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate current ledger
+        run: python worker/validate_clone_release_ledger.py
+      - name: Enforce append-only immutable history
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse HEAD^ >/dev/null 2>&1 && git cat-file -e HEAD^:content/clone_release_ledger_v1.json 2>/dev/null; then
+            git show HEAD^:content/clone_release_ledger_v1.json > /tmp/clone_release_ledger_baseline.json
+            python worker/validate_clone_release_ledger.py --baseline /tmp/clone_release_ledger_baseline.json
+          else
+            echo 'No prior ledger exists; validating initial ledger only.'
+          fi
+      - name: Python syntax sanity
+        run: python -m py_compile worker/validate_clone_release_ledger.py
