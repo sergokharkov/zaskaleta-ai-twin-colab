@@ -1,0 +1,12 @@
+{
+  "schema": "zaskaleta-clone-release-ledger-v1",
+  "current_stable": null,
+  "releases": [],
+  "policy": {
+    "append_only": true,
+    "stable_entries_immutable": true,
+    "manual_promotion_required": true,
+    "identity_regression_tolerance": 0.0,
+    "raw_biometric_media_forbidden": true
+  }
+}
