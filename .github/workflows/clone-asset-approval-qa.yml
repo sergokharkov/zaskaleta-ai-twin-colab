@@ -1,0 +1,89 @@
+name: Clone Asset Approval QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/locate_clone_assets.py'
+      - 'worker/run_clone_v2_test.py'
+      - 'content/master_clone_package.json'
+      - 'content/clone_reference_profile.json'
+      - '.github/workflows/clone-asset-approval-qa.yml'
+  pull_request:
+    paths:
+      - 'worker/locate_clone_assets.py'
+      - 'worker/run_clone_v2_test.py'
+      - 'content/master_clone_package.json'
+      - 'content/clone_reference_profile.json'
+      - '.github/workflows/clone-asset-approval-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  approved-assets-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile worker/locate_clone_assets.py worker/run_clone_v2_test.py
+      - name: Verify motion approval policy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          package = json.loads(Path('content/master_clone_package.json').read_text(encoding='utf-8'))
+          motion = (package.get('components') or {}).get('motion') or {}
+          learning = motion.get('learning_policy') or {}
+          assert learning.get('manual_approval_required') is True
+          assert learning.get('approved_motion_only') is True
+          assert isinstance(motion.get('primary_reference'), str) and motion.get('primary_reference')
+          assert isinstance(motion.get('supporting_reference'), str) and motion.get('supporting_reference')
+          print('MASTER CLONE motion policy requires explicit approved references only')
+          PY
+      - name: Prevent filename glob from granting approval
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('worker/locate_clone_assets.py').read_text(encoding='utf-8')
+          required = [
+              'load_motion_approval',
+              'approved_motion_only',
+              'manual_approval_required',
+              'approved_for_master_clone',
+              'candidate_behavior_videos',
+              'legacy_behavior_candidates',
+              "'auto_discovery_grants_approval': False",
+              "'unapproved_candidates_quarantined': True",
+              'Motion approval policy is missing or weakened',
+          ]
+          missing = [token for token in required if token not in source]
+          if missing:
+              raise SystemExit('Clone asset approval enforcement missing: ' + ', '.join(missing))
+
+          forbidden = [
+              "'verified': True,\n            'notes': 'User-approved real motion reference for the persistent clone.'",
+              "priority = next((p for p in master_behaviors",
+          ]
+          hits = [token for token in forbidden if token in source]
+          if hits:
+              raise SystemExit('Unsafe auto-approval behavior returned: ' + ', '.join(hits))
+          print('Auto-discovered motion is quarantined unless explicitly allowlisted')
+          PY
+      - name: Verify canonical photo is explicit
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          profile = json.loads(Path('content/clone_reference_profile.json').read_text(encoding='utf-8'))
+          canonical = profile.get('canonical_identity_photo')
+          photos = profile.get('photo_filenames') or []
+          assert canonical and photos.count(canonical) == 1
+          print('Canonical identity is explicitly present exactly once in the approved photo set')
+          PY
