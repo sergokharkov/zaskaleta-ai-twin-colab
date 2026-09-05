@@ -14,6 +14,11 @@
     "client_side_encryption_must_be_enabled": true,
     "versioning_must_be_enabled": true,
     "eu_region_policy_must_pass": true,
+    "trusted_clone_memory_checkpoint_must_be_verified": true,
+    "checkpoint_storage_version_must_be_verified": true,
+    "checkpoint_immutable_retention_must_be_verified": true,
+    "checkpoint_independent_backup_must_be_verified": true,
+    "checkpoint_manual_approval_must_be_verified": true,
     "source_deletion_forbidden_during_cutover": true,
     "rollback_plan_required": true,
     "google_drive_may_only_be_disabled_after_manual_cutover": true
@@ -26,8 +31,18 @@
     "restore_evaluation_sha256",
     "backup_verification",
     "runtime_storage_readiness",
+    "memory_checkpoint_verification",
     "rollback_target",
     "decision"
   ],
-  "decision_values": ["PASS_TO_MANUAL_CUTOVER", "BLOCK_CUTOVER"]
+  "memory_checkpoint_verification_required_fields": [
+    "checkpoint_evaluation_sha256",
+    "checkpoint_validation_passed",
+    "storage_version_verified",
+    "immutable_retention_verified",
+    "independent_backup_verified",
+    "manual_approval_verified"
+  ],
+  "decision_values": ["PASS_TO_MANUAL_CUTOVER", "BLOCK_CUTOVER"],
+  "note": "Static checkpoint policy validation alone is insufficient. Storage cutover requires runtime evidence that the checkpoint object version, immutable retention, independent backup, and manual approval were actually verified."
 }
