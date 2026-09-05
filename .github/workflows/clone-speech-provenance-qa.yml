@@ -1,0 +1,59 @@
+name: Clone Speech Provenance QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/generate_scene_speech.py'
+      - '.github/workflows/clone-speech-provenance-qa.yml'
+  pull_request:
+    paths:
+      - 'worker/generate_scene_speech.py'
+      - '.github/workflows/clone-speech-provenance-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  speech-provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile worker/generate_scene_speech.py
+      - name: Enforce speech provenance contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          t = Path('worker/generate_scene_speech.py').read_text(encoding='utf-8')
+          required = [
+              'sha256_file',
+              'master_voice_sha256',
+              'normalized_reference_sha256',
+              'audio_sha256',
+              'FINAL_SAMPLE_RATE = 24000',
+              'FINAL_CHANNELS = 1',
+              "'loop_or_repeat_allowed': False",
+              "'loop_or_repeat_used': False",
+              'Final clone speech format mismatch',
+              'zaskaleta-scene-speech-manifest-v2',
+          ]
+          missing = [x for x in required if x not in t]
+          if missing:
+              raise SystemExit('Speech provenance contract weakened: ' + ', '.join(missing))
+          forbidden = [
+              '-stream_loop',
+              'aloop=',
+              'requests.post(',
+              'runpodctl',
+              'print(os.environ',
+          ]
+          hits = [x for x in forbidden if x in t]
+          if hits:
+              raise SystemExit('Forbidden speech behavior found: ' + ', '.join(hits))
+          print('Clone speech provenance OK: master/output hashes, strict 24 kHz mono, no loop/repeat, no secret/network side effects')
+          PY
