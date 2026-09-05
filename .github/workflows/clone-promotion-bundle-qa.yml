@@ -50,6 +50,8 @@ jobs:
           rules = policy.get('rules') or {}
           assert rules.get('all_artifacts_required') is True
           assert rules.get('all_artifact_hashes_required') is True
+          assert rules.get('candidate_id_required_on_all_artifacts') is True
+          assert rules.get('candidate_id_must_match_across_all_artifacts') is True
           assert rules.get('any_identity_failure_blocks_promotion') is True
           assert rules.get('any_temporal_guard_failure_blocks_promotion') is True
           assert rules.get('any_render_provenance_failure_blocks_promotion') is True
@@ -59,7 +61,7 @@ jobs:
           assert rules.get('approved_motion_sha256_must_be_bound_to_render') is True
           assert rules.get('manual_override_for_identity_forbidden') is True
           assert rules.get('promotion_never_occurs_in_validator') is True
-          print('Promotion evidence policy OK: identity + temporal + immutable render provenance required')
+          print('Promotion evidence policy OK: one mandatory candidate id + identity + temporal + immutable render provenance')
           PY
       - name: Enforce promotion validator safety invariants
         run: |
@@ -74,7 +76,9 @@ jobs:
               'render_provenance_not_passed',
               'render_provenance_failed',
               'challenger_contains_failures',
+              'candidate_id_missing:',
               'candidate_id_mismatch_across_artifacts',
+              "'candidate_id_required_on_all_artifacts': True",
               "'manual_promotion_required': True",
               "'auto_promote': False",
               "'stable_release_immutable': True",
@@ -89,7 +93,7 @@ jobs:
           hits = [token for token in forbidden if token in source]
           if hits:
               raise SystemExit('Unsafe automatic promotion behavior detected: ' + ', '.join(hits))
-          print('Promotion bundle validator is fail-closed and cannot auto-promote MASTER CLONE')
+          print('Promotion bundle validator is fail-closed, candidate-bound, and cannot auto-promote MASTER CLONE')
           PY
       - name: Enforce lipsync provenance contract
         run: |
