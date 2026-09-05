@@ -6,11 +6,13 @@ on:
     paths:
       - 'content/talking_temporal_guard_v1.json'
       - 'worker/validate_clone_v2_temporal_output.py'
+      - 'worker/run_clone_v2_test.py'
       - '.github/workflows/clone-temporal-validator-qa.yml'
   pull_request:
     paths:
       - 'content/talking_temporal_guard_v1.json'
       - 'worker/validate_clone_v2_temporal_output.py'
+      - 'worker/run_clone_v2_test.py'
       - '.github/workflows/clone-temporal-validator-qa.yml'
 
 permissions:
@@ -47,8 +49,8 @@ jobs:
           print('Temporal policy invariants OK')
           PY
       - name: Python syntax sanity
-        run: python -m py_compile worker/validate_clone_v2_temporal_output.py
-      - name: Validate required hard-stop tokens
+        run: python -m py_compile worker/validate_clone_v2_temporal_output.py worker/run_clone_v2_test.py
+      - name: Validate standalone temporal hard-stop tokens
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -64,5 +66,38 @@ jobs:
           missing = [token for token in required if token not in text]
           if missing:
               raise SystemExit('Missing validator safeguards: ' + ', '.join(missing))
-          print('Temporal validator safeguards present')
+          print('Standalone temporal validator safeguards present')
+          PY
+      - name: Enforce policy-driven temporal guard in render path
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('worker/run_clone_v2_test.py').read_text(encoding='utf-8')
+          required = [
+              "talking_temporal_guard_v1.json",
+              "temporal_face_guard(final, temporal_policy)",
+              "policy_driven",
+              "maximum_normalized_center_jump",
+              "maximum_adjacent_area_ratio_multiplier",
+              "face_center_jump_exceeded",
+              "face_scale_jump_exceeded",
+              "temporal_policy_sha256",
+              "geometry_stable",
+          ]
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('Clone v2 render path is not fully policy-driven: ' + ', '.join(missing))
+
+          forbidden = [
+              'TEMPORAL_FACE_SAMPLES =',
+              'TEMPORAL_FACE_MIN_PASS_RATIO =',
+              'TEMPORAL_FACE_MAX_COUNT =',
+              'TEMPORAL_FACE_MIN_SHARPNESS =',
+              'TEMPORAL_FACE_MIN_AREA_RATIO =',
+              'TEMPORAL_FACE_MAX_AREA_RATIO =',
+          ]
+          hits = [token for token in forbidden if token in text]
+          if hits:
+              raise SystemExit('Duplicate hard-coded temporal thresholds detected: ' + ', '.join(hits))
+          print('Clone v2 render path uses the temporal policy as the single source of truth')
           PY
