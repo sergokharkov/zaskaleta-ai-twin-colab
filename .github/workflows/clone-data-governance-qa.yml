@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'content/clone_memory_policy_v1.json'
+      - 'content/clone_memory_checkpoint_policy_v1.json'
       - 'content/storage_restore_policy_v1.json'
       - 'content/storage_retention_policy_v1.json'
       - 'content/storage_cutover_policy_v1.json'
       - 'content/storage_migration_policy_v1.json'
       - 'content/storage_config.json'
       - 'worker/validate_clone_memory_event.py'
+      - 'worker/validate_clone_memory_checkpoint.py'
       - 'worker/validate_storage_migration_manifest.py'
       - 'worker/validate_storage_restore.py'
       - 'worker/validate_storage_cutover.py'
@@ -19,12 +21,14 @@ on:
   pull_request:
     paths:
       - 'content/clone_memory_policy_v1.json'
+      - 'content/clone_memory_checkpoint_policy_v1.json'
       - 'content/storage_restore_policy_v1.json'
       - 'content/storage_retention_policy_v1.json'
       - 'content/storage_cutover_policy_v1.json'
       - 'content/storage_migration_policy_v1.json'
       - 'content/storage_config.json'
       - 'worker/validate_clone_memory_event.py'
+      - 'worker/validate_clone_memory_checkpoint.py'
       - 'worker/validate_storage_migration_manifest.py'
       - 'worker/validate_storage_restore.py'
       - 'worker/validate_storage_cutover.py'
@@ -49,6 +53,7 @@ jobs:
         run: |
           python -m py_compile \
             worker/validate_clone_memory_event.py \
+            worker/validate_clone_memory_checkpoint.py \
             worker/validate_storage_migration_manifest.py \
             worker/validate_storage_restore.py \
             worker/validate_storage_cutover.py \
@@ -63,6 +68,10 @@ jobs:
               'raw_biometric_payload_forbidden', 'rejected_memory_cannot_train',
               'recursive_secret_scan_enforced', 'secret_value_signature_scan_enforced'
             ],
+            'worker/validate_clone_memory_checkpoint.py': [
+              'storage_version_id_required', 'immutable_retention_not_confirmed',
+              'independent_backup_not_confirmed', 'manual_checkpoint_approval_required', 'CHECKPOINT_REJECTED'
+            ],
             'worker/validate_storage_migration_manifest.py': [
               'BLOCK_MIGRATION', 'object_', 'secret_field_forbidden', 'PASS_TO_RESTORE_TEST'
             ],
@@ -71,7 +80,8 @@ jobs:
             ],
             'worker/validate_storage_cutover.py': [
               'automatic_cutover_forbidden', 'source_deletion_forbidden_during_cutover',
-              'backup_not_independently_verified', 'BLOCK_CUTOVER'
+              'backup_not_independently_verified', 'memory_checkpoint_not_verified',
+              'trusted_clone_memory_checkpoint_verified', 'BLOCK_CUTOVER'
             ],
           }
           for path, tokens in checks.items():
@@ -119,6 +129,66 @@ jobs:
             if subprocess.run([sys.executable, 'worker/validate_clone_memory_event.py', '--event', str(bad2)]).returncode == 0:
               raise SystemExit('Nested raw biometric payload was not rejected')
           print('Recursive Clone Memory secret/biometric rejection works')
+          PY
+      - name: Exercise storage cutover memory checkpoint gate
+        run: |
+          python - <<'PY'
+          import copy, json, subprocess, sys, tempfile
+          from pathlib import Path
+          good = {
+            'migration_manifest_sha256': 'a' * 64,
+            'expected_object_count': 3,
+            'verified_object_count': 3,
+            'failed_object_count': 0,
+            'restore_evaluation_sha256': 'b' * 64,
+            'backup_verification': {'verified': True, 'independent_credentials': True},
+            'runtime_storage_readiness': {
+              'credentials_complete': True,
+              'client_side_encryption_enabled': True,
+              'versioning_enabled': True,
+              'eu_region_policy_passed': True,
+            },
+            'memory_checkpoint_verification': {
+              'checkpoint_evaluation_sha256': 'c' * 64,
+              'checkpoint_validation_passed': True,
+              'storage_version_verified': True,
+              'immutable_retention_verified': True,
+              'independent_backup_verified': True,
+              'manual_approval_verified': True,
+            },
+            'rollback_target': 'google_drive_legacy_read_only',
+            'decision': 'PASS_TO_MANUAL_CUTOVER',
+            'source_deleted': False,
+            'automatic_cutover_performed': False,
+          }
+          with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            ok = td / 'cutover-ok.json'
+            ok.write_text(json.dumps(good), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_storage_cutover.py', '--evidence', str(ok)]).returncode != 0:
+              raise SystemExit('Complete cutover evidence was rejected')
+
+            missing_checkpoint = copy.deepcopy(good)
+            del missing_checkpoint['memory_checkpoint_verification']
+            bad1 = td / 'cutover-no-checkpoint.json'
+            bad1.write_text(json.dumps(missing_checkpoint), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_storage_cutover.py', '--evidence', str(bad1)]).returncode == 0:
+              raise SystemExit('Cutover passed without Clone Memory checkpoint evidence')
+
+            unverified_version = copy.deepcopy(good)
+            unverified_version['memory_checkpoint_verification']['storage_version_verified'] = False
+            bad2 = td / 'cutover-unverified-version.json'
+            bad2.write_text(json.dumps(unverified_version), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_storage_cutover.py', '--evidence', str(bad2)]).returncode == 0:
+              raise SystemExit('Cutover passed without verified checkpoint storage version')
+
+            string_count = copy.deepcopy(good)
+            string_count['expected_object_count'] = '3'
+            bad3 = td / 'cutover-string-count.json'
+            bad3.write_text(json.dumps(string_count), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_storage_cutover.py', '--evidence', str(bad3)]).returncode == 0:
+              raise SystemExit('Cutover accepted non-integer migration count')
+          print('Storage cutover requires real trusted Clone Memory checkpoint evidence')
           PY
       - name: Reject secret or raw biometric payload patterns in policies
         run: |
