@@ -1,0 +1,45 @@
+{
+  "schema": "zaskaleta-clone-promotion-bundle-policy-v1",
+  "purpose": "Require a complete, auditable evidence bundle before a MASTER CLONE challenger can reach manual promotion review.",
+  "auto_promote": false,
+  "manual_promotion_required": true,
+  "stable_release_immutable": true,
+  "rollback_required": true,
+  "identity_regression_tolerance": 0.0,
+  "required_artifacts": {
+    "clone_evaluation": {
+      "required_decision": "PASS_TO_MANUAL_REVIEW"
+    },
+    "identity_view_evaluation": {
+      "required_decision": "PASS_TO_MANUAL_PROMOTION_REVIEW",
+      "zero_identity_regression_enforced": true,
+      "manual_override_allowed": false
+    },
+    "challenger_comparison": {
+      "required_decision": "ELIGIBLE_FOR_MANUAL_PROMOTION",
+      "manual_promotion_required": true,
+      "auto_promote": false
+    },
+    "temporal_face_guard": {
+      "required_passed": true
+    }
+  },
+  "required_identity_views": [
+    "frontal",
+    "left_profile",
+    "right_profile",
+    "left_three_quarter",
+    "right_three_quarter"
+  ],
+  "rules": {
+    "all_artifacts_required": true,
+    "all_artifact_hashes_required": true,
+    "candidate_id_must_match_across_artifacts_when_present": true,
+    "any_identity_failure_blocks_promotion": true,
+    "any_temporal_guard_failure_blocks_promotion": true,
+    "manual_override_for_identity_forbidden": true,
+    "promotion_never_occurs_in_validator": true
+  },
+  "eligible_decision": "READY_FOR_MANUAL_PROMOTION_REVIEW",
+  "blocked_decision": "BLOCK_PROMOTION"
+}
