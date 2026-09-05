@@ -1,0 +1,80 @@
+name: Clone Promotion Bundle QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/clone_promotion_bundle_policy_v1.json'
+      - 'worker/validate_clone_promotion_bundle.py'
+      - '.github/workflows/clone-promotion-bundle-qa.yml'
+  pull_request:
+    paths:
+      - 'content/clone_promotion_bundle_policy_v1.json'
+      - 'worker/validate_clone_promotion_bundle.py'
+      - '.github/workflows/clone-promotion-bundle-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  promotion-bundle-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate promotion bundle policy invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          policy = json.loads(Path('content/clone_promotion_bundle_policy_v1.json').read_text(encoding='utf-8'))
+          assert policy.get('auto_promote') is False
+          assert policy.get('manual_promotion_required') is True
+          assert policy.get('stable_release_immutable') is True
+          assert policy.get('rollback_required') is True
+          assert float(policy.get('identity_regression_tolerance', 1)) == 0.0
+          assert policy.get('required_identity_views') == [
+              'frontal', 'left_profile', 'right_profile', 'left_three_quarter', 'right_three_quarter'
+          ]
+          rules = policy.get('rules') or {}
+          assert rules.get('all_artifacts_required') is True
+          assert rules.get('all_artifact_hashes_required') is True
+          assert rules.get('any_identity_failure_blocks_promotion') is True
+          assert rules.get('any_temporal_guard_failure_blocks_promotion') is True
+          assert rules.get('manual_override_for_identity_forbidden') is True
+          assert rules.get('promotion_never_occurs_in_validator') is True
+          print('Promotion evidence policy OK: complete bundle, zero face regression, manual promotion only')
+          PY
+      - name: Enforce promotion validator safety invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('worker/validate_clone_promotion_bundle.py').read_text(encoding='utf-8')
+          required = [
+              'identity_drift_above_zero:',
+              'identity_view_failed:',
+              'temporal_face_guard_failed',
+              'challenger_contains_failures',
+              'candidate_id_mismatch_across_artifacts',
+              "'manual_promotion_required': True",
+              "'auto_promote': False",
+              "'stable_release_immutable': True",
+              "'rollback_required': True",
+              "'zero_identity_regression_enforced': True",
+          ]
+          missing = [token for token in required if token not in source]
+          if missing:
+              raise SystemExit('Promotion bundle validator weakened or incomplete: ' + ', '.join(missing))
+          forbidden = ['auto_promote = True', "'auto_promote': True", 'promote_master_clone(']
+          hits = [token for token in forbidden if token in source]
+          if hits:
+              raise SystemExit('Unsafe automatic promotion behavior detected: ' + ', '.join(hits))
+          print('Promotion bundle validator is fail-closed and cannot auto-promote MASTER CLONE')
+          PY
+      - name: Python syntax sanity
+        run: python -m py_compile worker/validate_clone_promotion_bundle.py
