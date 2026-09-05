@@ -1,10 +1,20 @@
 import argparse
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def get_metric(metrics, key):
@@ -24,8 +34,10 @@ def main():
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
-    metrics = load_json(args.metrics)
-    gate = load_json(args.gate)
+    metrics_path = Path(args.metrics)
+    gate_path = Path(args.gate)
+    metrics = load_json(metrics_path)
+    gate = load_json(gate_path)
     thresholds = gate["thresholds"]
     failures = []
     checks = []
@@ -60,26 +72,39 @@ def main():
     if references.get("all_approved") is not True:
         failures.append("references_not_fully_approved")
 
+    candidate_id = metrics.get("candidate_id")
+    if not candidate_id or not isinstance(candidate_id, str):
+        failures.append("missing_candidate_id")
+
     decision = "PASS_TO_MANUAL_REVIEW" if not failures else "REJECT_CANDIDATE"
     report = {
-        "schema": "zaskaleta-clone-release-evaluation-v1",
-        "candidate_id": metrics.get("candidate_id"),
+        "schema": "zaskaleta-clone-release-evaluation-v2",
+        "candidate_id": candidate_id,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "decision": decision,
         "eligible_for_master": False,
         "manual_approval_required": True,
         "checks": checks,
         "hard_fail_flags_detected": hard_hits,
         "failures": failures,
+        "provenance": {
+            "metrics_sha256": sha256_file(metrics_path),
+            "gate_sha256": sha256_file(gate_path),
+            "gate_schema": gate.get("schema"),
+        },
         "safety": {
             "auto_promote_to_master": False,
-            "master_clone_unchanged": True
+            "master_clone_unchanged": True,
+            "report_is_advisory_until_manual_approval": True,
         }
     }
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(decision)
+    print("METRICS_SHA256=" + report["provenance"]["metrics_sha256"])
+    print("GATE_SHA256=" + report["provenance"]["gate_sha256"])
     if failures:
         for item in failures:
             print("-", item)
