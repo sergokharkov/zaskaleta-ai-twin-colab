@@ -1,0 +1,47 @@
+{
+  "schema": "zaskaleta-clone-quality-gate-v1",
+  "purpose": "Block promotion of a generated clone version unless identity, talking, voice and motion quality all pass explicit review gates.",
+  "manual_approval_required": true,
+  "auto_promote_to_master": false,
+  "thresholds": {
+    "identity_similarity_min": 0.92,
+    "identity_drift_max": 0.08,
+    "lip_sync_min": 0.88,
+    "voice_similarity_min": 0.90,
+    "motion_naturalness_min": 0.84,
+    "artifact_score_max": 0.10,
+    "face_occlusion_ratio_max": 0.18
+  },
+  "hard_fail_flags": [
+    "wrong_identity",
+    "face_swap_detected",
+    "wrong_age",
+    "wrong_beard",
+    "wrong_hairline",
+    "jaw_drift",
+    "mouth_drift",
+    "severe_lip_sync_error",
+    "unnatural_motion",
+    "voice_identity_mismatch",
+    "unapproved_reference_used",
+    "generated_material_used_as_identity_without_approval"
+  ],
+  "promotion_flow": [
+    "CANDIDATE",
+    "AUTOMATED_QA",
+    "MANUAL_REVIEW",
+    "APPROVED_VERSION",
+    "MASTER_CLONE"
+  ],
+  "required_evidence": [
+    "metrics_json",
+    "reference_manifest",
+    "render_manifest",
+    "manual_reviewer_decision"
+  ],
+  "versioning": {
+    "immutable_approved_versions": true,
+    "rollback_required": true,
+    "retain_previous_master": true
+  }
+}
