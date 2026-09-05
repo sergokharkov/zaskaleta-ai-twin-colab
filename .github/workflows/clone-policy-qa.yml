@@ -5,12 +5,28 @@ on:
     branches: [main]
     paths:
       - 'content/user_video_candidates_*.json'
+      - 'content/training_candidates_*.json'
+      - 'content/clone_quality_gate_v1.json'
+      - 'content/clone_release_policy_v1.json'
+      - 'content/render_face_guard_v1.json'
+      - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
+      - 'worker/evaluate_clone_release.py'
+      - 'worker/compare_clone_challenger.py'
+      - 'worker/generate_scene_keyframes.py'
       - '.github/workflows/clone-policy-qa.yml'
   pull_request:
     paths:
       - 'content/user_video_candidates_*.json'
+      - 'content/training_candidates_*.json'
+      - 'content/clone_quality_gate_v1.json'
+      - 'content/clone_release_policy_v1.json'
+      - 'content/render_face_guard_v1.json'
+      - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
+      - 'worker/evaluate_clone_release.py'
+      - 'worker/compare_clone_challenger.py'
+      - 'worker/generate_scene_keyframes.py'
       - '.github/workflows/clone-policy-qa.yml'
 
 permissions:
@@ -27,6 +43,48 @@ jobs:
           python-version: '3.12'
       - name: Validate candidate registries
         run: python worker/validate_candidate_registry.py
+      - name: Validate clone policy invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          quality = json.loads(Path('content/clone_quality_gate_v1.json').read_text(encoding='utf-8'))
+          release = json.loads(Path('content/clone_release_policy_v1.json').read_text(encoding='utf-8'))
+          guard = json.loads(Path('content/render_face_guard_v1.json').read_text(encoding='utf-8'))
+          master = json.loads(Path('content/master_clone_package.json').read_text(encoding='utf-8'))
+
+          assert quality.get('manual_approval_required') is True
+          assert quality.get('auto_promote_to_master') is False
+          assert release.get('manual_promotion_required') is True
+          assert release.get('auto_promote') is False
+          assert float(release.get('identity_regression_tolerance', 1)) == 0.0
+          assert set(release.get('identity_metrics') or []) == {'identity_similarity', 'identity_drift'}
+
+          identity_policy = guard.get('identity_policy') or {}
+          assert identity_policy.get('canonical_reference_only_for_generation') is True
+          assert identity_policy.get('no_beautification') is True
+          assert identity_policy.get('no_rejuvenation') is True
+          assert identity_policy.get('no_face_redesign') is True
+          assert identity_policy.get('no_identity_substitution') is True
+          assert float(identity_policy.get('release_identity_regression_tolerance', 1)) == 0.0
+          assert guard.get('reject_if_multiple_faces') is True
+          assert int(guard.get('max_face_count', 99)) == 1
+
+          lifecycle = master.get('improvement_lifecycle') or {}
+          assert lifecycle.get('stable_release_is_immutable') is True
+          assert lifecycle.get('manual_promotion_required') is True
+          assert lifecycle.get('holdout_regression_set') is True
+
+          print('Clone policy invariants OK: zero identity regression, immutable stable release, manual promotion only')
+          PY
+      - name: Python syntax sanity
+        run: |
+          python -m py_compile \
+            worker/validate_candidate_registry.py \
+            worker/evaluate_clone_release.py \
+            worker/compare_clone_challenger.py \
+            worker/generate_scene_keyframes.py
       - name: Reject raw biometric media tracked by Git
         run: |
           python - <<'PY'
