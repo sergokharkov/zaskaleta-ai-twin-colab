@@ -6,11 +6,15 @@ on:
     paths:
       - 'content/clone_promotion_bundle_policy_v1.json'
       - 'worker/validate_clone_promotion_bundle.py'
+      - 'worker/validate_lipsync_render_provenance.py'
+      - 'worker/lipsync_musetalk.py'
       - '.github/workflows/clone-promotion-bundle-qa.yml'
   pull_request:
     paths:
       - 'content/clone_promotion_bundle_policy_v1.json'
       - 'worker/validate_clone_promotion_bundle.py'
+      - 'worker/validate_lipsync_render_provenance.py'
+      - 'worker/lipsync_musetalk.py'
       - '.github/workflows/clone-promotion-bundle-qa.yml'
 
 permissions:
@@ -40,14 +44,22 @@ jobs:
           assert policy.get('required_identity_views') == [
               'frontal', 'left_profile', 'right_profile', 'left_three_quarter', 'right_three_quarter'
           ]
+          required = policy.get('required_artifacts') or {}
+          assert required.get('render_provenance', {}).get('required_decision') == 'PASS_RENDER_PROVENANCE'
+          assert required.get('render_provenance', {}).get('photo_fallback_used') is False
           rules = policy.get('rules') or {}
           assert rules.get('all_artifacts_required') is True
           assert rules.get('all_artifact_hashes_required') is True
           assert rules.get('any_identity_failure_blocks_promotion') is True
           assert rules.get('any_temporal_guard_failure_blocks_promotion') is True
+          assert rules.get('any_render_provenance_failure_blocks_promotion') is True
+          assert rules.get('render_output_sha256_must_be_verified') is True
+          assert rules.get('speech_audio_sha256_must_be_bound_to_render') is True
+          assert rules.get('canonical_identity_sha256_must_be_bound_to_render') is True
+          assert rules.get('approved_motion_sha256_must_be_bound_to_render') is True
           assert rules.get('manual_override_for_identity_forbidden') is True
           assert rules.get('promotion_never_occurs_in_validator') is True
-          print('Promotion evidence policy OK: complete bundle, zero face regression, manual promotion only')
+          print('Promotion evidence policy OK: identity + temporal + immutable render provenance required')
           PY
       - name: Enforce promotion validator safety invariants
         run: |
@@ -59,6 +71,8 @@ jobs:
               'identity_drift_above_zero:',
               'identity_view_failed:',
               'temporal_face_guard_failed',
+              'render_provenance_not_passed',
+              'render_provenance_failed',
               'challenger_contains_failures',
               'candidate_id_mismatch_across_artifacts',
               "'manual_promotion_required': True",
@@ -66,6 +80,7 @@ jobs:
               "'stable_release_immutable': True",
               "'rollback_required': True",
               "'zero_identity_regression_enforced': True",
+              "'render_provenance_required': True",
           ]
           missing = [token for token in required if token not in source]
           if missing:
@@ -76,5 +91,23 @@ jobs:
               raise SystemExit('Unsafe automatic promotion behavior detected: ' + ', '.join(hits))
           print('Promotion bundle validator is fail-closed and cannot auto-promote MASTER CLONE')
           PY
+      - name: Enforce lipsync provenance contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          lipsync = Path('worker/lipsync_musetalk.py').read_text(encoding='utf-8')
+          validator = Path('worker/validate_lipsync_render_provenance.py').read_text(encoding='utf-8')
+          for token in ['canonical_photo_sha256', 'approved_reference_video_sha256', 'speech_audio_sha256', 'zaskaleta-lipsync-render-provenance-v1']:
+              if token not in lipsync:
+                  raise SystemExit('Missing lipsync provenance token: ' + token)
+          for token in ['output_sha256_mismatch', 'photo_fallback_used', 'PASS_RENDER_PROVENANCE']:
+              if token not in validator:
+                  raise SystemExit('Missing render provenance validator token: ' + token)
+          print('Lipsync output is cryptographically bound to identity, motion reference, speech audio, and final MP4')
+          PY
       - name: Python syntax sanity
-        run: python -m py_compile worker/validate_clone_promotion_bundle.py
+        run: |
+          python -m py_compile \
+            worker/validate_clone_promotion_bundle.py \
+            worker/validate_lipsync_render_provenance.py \
+            worker/lipsync_musetalk.py
