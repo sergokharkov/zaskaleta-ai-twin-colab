@@ -1,0 +1,65 @@
+name: Clone Duration Gate QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/clone_duration_gate_policy_v1.json'
+      - 'content/talking_profile_v2.json'
+      - 'worker/validate_clone_duration_progression.py'
+      - '.github/workflows/clone-duration-gate-qa.yml'
+  pull_request:
+    paths:
+      - 'content/clone_duration_gate_policy_v1.json'
+      - 'content/talking_profile_v2.json'
+      - 'worker/validate_clone_duration_progression.py'
+      - '.github/workflows/clone-duration-gate-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  duration-gate-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate policy invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('content/clone_duration_gate_policy_v1.json').read_text(encoding='utf-8'))
+          talking = json.loads(Path('content/talking_profile_v2.json').read_text(encoding='utf-8'))
+          gates = p['ordered_gates']
+          assert [g['id'] for g in gates] == ['gate_08_15','gate_15_30','gate_30_45','gate_45_60','gate_60_90']
+          assert [g['min_seconds'] for g in gates] == [8,15,30,45,60]
+          assert [g['max_seconds'] for g in gates] == [15,30,45,60,90]
+          assert talking['test_gate']['range_seconds'] == [8, 15]
+          r = p['rules']
+          assert r['sequential_only'] is True
+          assert r['skip_gate_allowed'] is False
+          assert r['manual_override_allowed'] is False
+          assert float(r['identity_regression_tolerance']) == 0.0
+          assert r['manual_promotion_required'] is True
+          print('Clone duration progression policy OK')
+          PY
+      - name: Python syntax sanity
+        run: python -m py_compile worker/validate_clone_duration_progression.py
+      - name: Test allow first gate and block unsafe skip
+        run: |
+          cat > /tmp/first.json <<'JSON'
+          {"requested_gate":"gate_08_15","passed_gates":[]}
+          JSON
+          python worker/validate_clone_duration_progression.py --evidence /tmp/first.json
+          cat > /tmp/skip.json <<'JSON'
+          {"requested_gate":"gate_30_45","passed_gates":["gate_08_15"]}
+          JSON
+          if python worker/validate_clone_duration_progression.py --evidence /tmp/skip.json; then
+            echo 'Unsafe duration skip was accepted' >&2
+            exit 1
+          fi
+          echo 'Unsafe duration skip correctly blocked'
