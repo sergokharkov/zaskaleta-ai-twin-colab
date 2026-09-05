@@ -1,0 +1,22 @@
+# Secrets / credentials
+*.service-account.json
+service-account*.json
+google-service-account*.json
+credentials*.json
+.env
+.env.*
+!.env.example
+
+# Runtime outputs
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.DS_Store
+
+# Local model/cache/runtime directories
+.cache/
+models/
+outputs/
+api_jobs/
+MASTER_CLONE/
