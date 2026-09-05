@@ -4,6 +4,17 @@
   "manual_promotion_required": true,
   "auto_promote": false,
   "identity_regression_tolerance": 0.0,
+  "face_regression_policy": {
+    "strict_zero_regression": true,
+    "canonical_identity_anchor_required": true,
+    "supporting_identity_references_required": true,
+    "all_identity_views_must_pass": true,
+    "required_views": ["frontal", "left_profile", "right_profile", "left_three_quarter", "right_three_quarter"],
+    "block_on_any_identity_metric_drop": true,
+    "block_on_any_face_structure_drift": true,
+    "block_on_any_age_beard_hairline_jaw_mouth_regression": true,
+    "manual_override_allowed": false
+  },
   "metric_regression_tolerances": {
     "lip_sync": 0.01,
     "voice_similarity": 0.01,
@@ -26,12 +37,26 @@
     "identity_similarity",
     "identity_drift"
   ],
+  "required_identity_flags_absent": [
+    "wrong_identity",
+    "face_swap_detected",
+    "wrong_age",
+    "wrong_beard",
+    "wrong_hairline",
+    "jaw_drift",
+    "mouth_drift",
+    "face_structure_drift",
+    "asymmetry_loss"
+  ],
   "required_candidate_decision": "PASS_TO_MANUAL_REVIEW",
   "promotion_decision": "ELIGIBLE_FOR_MANUAL_PROMOTION",
   "blocked_decision": "BLOCK_PROMOTION",
   "rules": [
     "The challenger must first pass clone_quality_gate_v1.",
-    "Identity may never regress versus the stable release.",
+    "Identity and facial structure may never regress versus the stable release.",
+    "Any regression in canonical facial geometry, age, beard, hairline, jaw, mouth or natural asymmetry blocks promotion.",
+    "Every required identity view must pass; one failed angle blocks promotion.",
+    "Identity regression cannot be manually overridden.",
     "Small bounded regressions in non-identity metrics are tolerated only to avoid noise-driven rejection.",
     "A challenger is never promoted automatically.",
     "The stable release is immutable and must remain available for rollback."
