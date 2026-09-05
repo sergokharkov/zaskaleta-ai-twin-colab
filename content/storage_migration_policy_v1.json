@@ -1,0 +1,49 @@
+{
+  "schema": "zaskaleta-storage-migration-policy-v1",
+  "source": {
+    "provider": "google_drive",
+    "role": "migration_source_only",
+    "read_only": true,
+    "delete_source_after_migration": false
+  },
+  "destination": {
+    "provider": "s3_compatible",
+    "canonical_after_cutover": true,
+    "eu_only_required": true,
+    "versioning_required": true,
+    "client_side_encryption_required_for_biometrics": true
+  },
+  "required_phases": [
+    "inventory",
+    "source_sha256",
+    "encrypt",
+    "upload",
+    "destination_verify",
+    "manifest_finalize",
+    "manual_cutover_review"
+  ],
+  "rules": {
+    "dry_run_default": true,
+    "manual_cutover_required": true,
+    "automatic_source_deletion_forbidden": true,
+    "automatic_google_drive_cutover_forbidden": true,
+    "source_and_destination_sha256_must_match_after_decryption": true,
+    "encryption_key_must_not_be_written_to_manifest": true,
+    "secret_values_must_not_be_logged": true,
+    "partial_migration_must_not_mark_complete": true,
+    "failed_objects_must_remain_retryable": true
+  },
+  "manifest": {
+    "path": "MASTER_CLONE/MEMORY/storage_migration_manifest_v1.json",
+    "append_only_history": true,
+    "required_fields_per_object": [
+      "relative_path",
+      "size_bytes",
+      "source_sha256",
+      "encrypted_object_key",
+      "encryption_nonce_b64",
+      "upload_status",
+      "verify_status"
+    ]
+  }
+}
