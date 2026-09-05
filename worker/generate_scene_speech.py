@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -22,6 +23,17 @@ VOICE_PRESETS = {
     'motivational': {'tempo': 0.99, 'pause_scale': 0.88, 'compressor_ratio': 1.85, 'lra': 10},
     'conversational': {'tempo': 0.97, 'pause_scale': 0.94, 'compressor_ratio': 1.55, 'lra': 12},
 }
+
+FINAL_SAMPLE_RATE = 24000
+FINAL_CHANNELS = 1
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def split_sentences(text: str):
@@ -99,7 +111,7 @@ def apply_voice_dynamics(src: Path, dst: Path, mode: str, preset: str):
     )
     subprocess.run([
         'ffmpeg', '-y', '-loglevel', 'error', '-i', str(src),
-        '-af', af, '-ar', '24000', '-ac', '1', str(dst)
+        '-af', af, '-ar', str(FINAL_SAMPLE_RATE), '-ac', str(FINAL_CHANNELS), str(dst)
     ], check=True)
 
 
@@ -140,6 +152,13 @@ def synth(text, tokenizer, tts, converter, target_se, work, out_path, device, mo
     base.unlink(missing_ok=True)
     converted.unlink(missing_ok=True)
 
+    info = sf.info(str(out_path))
+    if int(info.samplerate) != FINAL_SAMPLE_RATE or int(info.channels) != FINAL_CHANNELS:
+        raise RuntimeError(
+            f'Final clone speech format mismatch: expected {FINAL_SAMPLE_RATE} Hz/{FINAL_CHANNELS} ch, '
+            f'got {info.samplerate} Hz/{info.channels} ch'
+        )
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -152,6 +171,11 @@ def main():
 
     episode = json.loads(Path(args.episode).read_text(encoding='utf-8'))
     manifest = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
+    master_voice = Path(args.master_voice).resolve()
+    if not master_voice.is_file():
+        raise SystemExit('Master voice file is missing; refusing clone speech generation')
+    master_voice_sha256 = sha256_file(master_voice)
+
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     scenes = manifest['scenes']
@@ -181,14 +205,21 @@ def main():
             scene_texts[n] = narration_by_scene.get(n, '')
 
     if not any(scene_texts.values()):
-        (out / 'scene_speech_manifest.json').write_text('[]', encoding='utf-8')
+        empty_manifest = {
+            'schema': 'zaskaleta-scene-speech-manifest-v2',
+            'master_voice_sha256': master_voice_sha256,
+            'final_audio_contract': {'sample_rate_hz': FINAL_SAMPLE_RATE, 'channels': FINAL_CHANNELS, 'loop_or_repeat_allowed': False},
+            'scenes': [],
+        }
+        (out / 'scene_speech_manifest.json').write_text(json.dumps(empty_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
         print('✅ No main-character speech required')
         return
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer, tts, converter = load_models(device)
     normalized = out / '_master_voice_normalized.wav'
-    normalize_reference(Path(args.master_voice), normalized)
+    normalize_reference(master_voice, normalized)
+    normalized_reference_sha256 = sha256_file(normalized)
     target_se = converter.extract_se(str(normalized))
 
     audio_manifest = []
@@ -196,7 +227,20 @@ def main():
         n = int(scene['n'])
         text = scene_texts.get(n, '')
         if not text:
-            audio_manifest.append({'scene': n, 'speaker': 'AI_CLONE', 'text': '', 'audio': None, 'talking': False, 'mode': 'silent', 'voice_preset': args.voice_preset})
+            audio_manifest.append({
+                'scene': n,
+                'speaker': 'AI_CLONE',
+                'text': '',
+                'audio': None,
+                'audio_sha256': None,
+                'sample_rate_hz': None,
+                'channels': None,
+                'talking': False,
+                'mode': 'silent',
+                'voice_preset': args.voice_preset,
+                'master_voice_sha256': master_voice_sha256,
+                'loop_or_repeat_used': False,
+            })
             continue
         talking = n in preferred_talking or n in dialogue_clone
         mode = 'talking' if talking else 'voiceover'
@@ -207,16 +251,32 @@ def main():
             'speaker': 'AI_CLONE',
             'text': text,
             'audio': str(wav),
+            'audio_sha256': sha256_file(wav),
+            'sample_rate_hz': FINAL_SAMPLE_RATE,
+            'channels': FINAL_CHANNELS,
             'talking': talking,
             'mode': mode,
             'voice_preset': args.voice_preset,
+            'master_voice_sha256': master_voice_sha256,
+            'loop_or_repeat_used': False,
         })
         icon = '🗣️' if talking else '🎙️'
         print(f'{icon} Scene {n:02d} {mode}/{args.voice_preset}: {text}')
 
     normalized.unlink(missing_ok=True)
-    (out / 'scene_speech_manifest.json').write_text(json.dumps(audio_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(f'✅ Voice preset {args.voice_preset}: phrase-aware pauses + gentler dynamics + natural pacing')
+    speech_manifest = {
+        'schema': 'zaskaleta-scene-speech-manifest-v2',
+        'master_voice_sha256': master_voice_sha256,
+        'normalized_reference_sha256': normalized_reference_sha256,
+        'final_audio_contract': {
+            'sample_rate_hz': FINAL_SAMPLE_RATE,
+            'channels': FINAL_CHANNELS,
+            'loop_or_repeat_allowed': False,
+        },
+        'scenes': audio_manifest,
+    }
+    (out / 'scene_speech_manifest.json').write_text(json.dumps(speech_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(f'✅ Voice preset {args.voice_preset}: phrase-aware pauses + provenance hashes + strict 24 kHz mono output')
 
 
 if __name__ == '__main__':
