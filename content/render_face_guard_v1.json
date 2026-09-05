@@ -1,0 +1,25 @@
+{
+  "schema": "zaskaleta-render-face-guard-v1",
+  "purpose": "Reject obviously unusable AI-clone keyframes before they can enter downstream talking or release evaluation.",
+  "identity_scale": 1.12,
+  "attempts": 3,
+  "face_area_ratio_min": 0.012,
+  "face_area_ratio_max": 0.32,
+  "face_sharpness_min": 18.0,
+  "max_face_count": 1,
+  "require_detectable_face": true,
+  "reject_if_multiple_faces": true,
+  "identity_policy": {
+    "canonical_reference_only_for_generation": true,
+    "no_beautification": true,
+    "no_rejuvenation": true,
+    "no_face_redesign": true,
+    "no_identity_substitution": true,
+    "release_identity_regression_tolerance": 0.0
+  },
+  "notes": [
+    "This render guard is not an identity classifier and does not replace stable-vs-challenger identity evaluation.",
+    "A saved keyframe remains a candidate until downstream quality gates and manual review pass.",
+    "Supporting identity photos may be used for evaluation but must not silently replace the canonical generation anchor."
+  ]
+}
