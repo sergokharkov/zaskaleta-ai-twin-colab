@@ -1,0 +1,50 @@
+{
+  "schema": "zaskaleta-clone-memory-checkpoint-policy-v1",
+  "purpose": "Externally anchor the append-only Clone Memory hash-chain head so a full history rewrite cannot silently replace the trusted chain without checkpoint mismatch.",
+  "checkpoint_root": "MASTER_CLONE/MEMORY/CHECKPOINTS",
+  "automatic_trust_promotion": false,
+  "manual_checkpoint_approval_required": true,
+  "required_fields": [
+    "checkpoint_id",
+    "memory_chain_head_sha256",
+    "event_count",
+    "created_at",
+    "source_log_sha256",
+    "storage_object_key",
+    "storage_version_id",
+    "immutable_retention_confirmed",
+    "independent_backup_confirmed",
+    "manual_approval"
+  ],
+  "rules": {
+    "memory_chain_head_sha256_must_be_64_hex": true,
+    "source_log_sha256_must_be_64_hex": true,
+    "event_count_must_be_non_negative_integer": true,
+    "storage_provider_must_be_s3_compatible": true,
+    "storage_region_policy_must_be_EU_ONLY": true,
+    "storage_version_id_required": true,
+    "immutable_retention_confirmed_required": true,
+    "independent_backup_confirmed_required": true,
+    "manual_approval_must_be_true": true,
+    "checkpoint_record_contains_no_secrets": true,
+    "checkpoint_record_contains_no_raw_biometrics": true,
+    "checkpoint_is_append_only": true,
+    "checkpoint_overwrite_forbidden": true,
+    "checkpoint_delete_forbidden_before_retention_expiry": true,
+    "full_chain_rewrite_requires_checkpoint_mismatch_failure": true
+  },
+  "storage": {
+    "provider": "s3_compatible",
+    "region_policy": "EU_ONLY",
+    "versioning_required": true,
+    "object_lock_or_equivalent_immutable_retention_required_for_trusted_checkpoint": true,
+    "independent_backup_required": true
+  },
+  "security": {
+    "secret_values_allowed": false,
+    "raw_biometric_payloads_allowed": false,
+    "encryption_key_material_allowed": false,
+    "credential_material_allowed": false
+  },
+  "note": "This policy does not perform network calls and does not claim that an external checkpoint exists until a real storage version/object-lock record and independent backup have been verified."
+}
