@@ -28,6 +28,7 @@ REQUIRED = [
     'worker/lipsync_musetalk.py',
     'worker/validate_lipsync_render_provenance.py',
     'worker/materialize_clone_runtime_from_s3.py',
+    'worker/clone_job_artifact_store.py',
     'worker/migrate_clone_storage.py',
     'worker/storage_backend.py',
     'worker/validate_repo_security_baseline.py',
@@ -71,6 +72,7 @@ def main() -> int:
         if canonical.get('required_region_policy') != 'EU_ONLY': failures.append('storage_not_eu_only')
         if canonical.get('versioning_required') is not True: failures.append('versioning_not_required')
         if not canonical.get('migration_manifest_key'): failures.append('runtime_manifest_key_missing')
+        if not canonical.get('job_artifact_prefix'): failures.append('job_artifact_prefix_missing')
         if runtime.get('job_scoped_plaintext_materialization_required') is not True: failures.append('job_scoped_materialization_not_required')
         if runtime.get('delete_temporary_plaintext_after_job') is not True: failures.append('runtime_plaintext_cleanup_not_required')
         if runtime.get('runtime_attestation_required') is not True: failures.append('runtime_attestation_not_required')
@@ -81,6 +83,7 @@ def main() -> int:
         api = read('runpod/api_server.py')
         runner = read('worker/run_clone_v2_test.py')
         materializer = read('worker/materialize_clone_runtime_from_s3.py')
+        artifact_store = read('worker/clone_job_artifact_store.py')
         provenance = read('worker/validate_lipsync_render_provenance.py')
         requirements = read('runpod/requirements-api.txt')
         ignore = read('.gitignore')
@@ -94,6 +97,10 @@ def main() -> int:
             if token not in provenance: failures.append('provenance_validator_missing:' + token)
         for token in ('all_objects_verified', 'cleanup_required_after_job', 'Refusing to materialize private clone assets inside the Git repository'):
             if token not in materializer: failures.append('materializer_missing:' + token)
+        for token in ('AES-256-GCM', 'VERIFIED_DECRYPTED_SHA256', 'artifact_manifest_v1.json', "sub.add_parser('persist')", "sub.add_parser('restore')", 'strict_key'):
+            if token not in artifact_store: failures.append('artifact_store_missing:' + token)
+        for token in ('clone_job_artifact_store.py', 'artifacts_persisted_encrypted=True', 'cleanup_job_plaintext', 'BackgroundTask', 'JOB_ID_RE'):
+            if token not in api: failures.append('api_artifact_lifecycle_missing:' + token)
         for token in ('.env', '*.pem', '*.key', '_runtime_assets/', 'MASTER_CLONE/', 'MASTER_CLONE_ENCRYPTED/'):
             if token not in ignore: failures.append('gitignore_missing:' + token)
         if 'boto3==' not in requirements or 'cryptography==' not in requirements: failures.append('runtime_storage_dependencies_missing')
@@ -124,10 +131,11 @@ def main() -> int:
                     failures.append('runtime_env_missing:' + str(name))
 
     report = {
-        'schema': 'zaskaleta-clone-external-connection-readiness-v2',
+        'schema': 'zaskaleta-clone-external-connection-readiness-v3',
         'static_ready_for_external_connection_setup': not failures if not args.require_runtime_env else None,
         'runtime_env_ready_for_connection': not failures if args.require_runtime_env else None,
         'repository_security_baseline_required': True,
+        'encrypted_job_artifact_lifecycle_required': True,
         'external_connection_performed': False,
         'network_action_performed': False,
         'paid_gpu_started': False,
