@@ -82,7 +82,7 @@ def load_models(device):
     tts.eval()
     repo = snapshot_download(repo_id='myshell-ai/OpenVoiceV2', allow_patterns=['converter/*'])
     converter_dir = Path(repo) / 'converter'
-    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device)
+    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device, enable_watermark=False)
     converter.load_ckpt(str(converter_dir / 'checkpoint.pth'))
     return tokenizer, tts, converter
 
