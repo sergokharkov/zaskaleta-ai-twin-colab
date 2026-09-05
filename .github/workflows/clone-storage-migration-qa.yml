@@ -1,0 +1,82 @@
+name: Clone Storage Migration QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/storage_config.json'
+      - 'content/storage_migration_policy_v1.json'
+      - 'worker/storage_backend.py'
+      - 'worker/migrate_clone_storage.py'
+      - '.github/workflows/clone-storage-migration-qa.yml'
+  pull_request:
+    paths:
+      - 'content/storage_config.json'
+      - 'content/storage_migration_policy_v1.json'
+      - 'worker/storage_backend.py'
+      - 'worker/migrate_clone_storage.py'
+      - '.github/workflows/clone-storage-migration-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python syntax sanity
+        run: python -m py_compile worker/storage_backend.py worker/migrate_clone_storage.py
+      - name: Validate migration policy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('content/storage_migration_policy_v1.json').read_text(encoding='utf-8'))
+          s = json.loads(Path('content/storage_config.json').read_text(encoding='utf-8'))
+          assert p['schema'] == 'zaskaleta-storage-migration-policy-v1'
+          assert p['source']['read_only'] is True
+          assert p['source']['delete_source_after_migration'] is False
+          assert p['rules']['dry_run_default'] is True
+          assert p['rules']['manual_cutover_required'] is True
+          assert p['rules']['automatic_source_deletion_forbidden'] is True
+          assert p['rules']['automatic_google_drive_cutover_forbidden'] is True
+          assert p['rules']['encryption_key_must_not_be_written_to_manifest'] is True
+          assert s['canonical_storage']['provider'] == 's3_compatible'
+          assert s['canonical_storage']['required_region_policy'] == 'EU_ONLY'
+          assert s['encryption']['client_side_encryption_required'] is True
+          print('Storage migration policy invariants OK')
+          PY
+      - name: Enforce safe defaults and no cutover side effects
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('worker/migrate_clone_storage.py').read_text(encoding='utf-8')
+          required = [
+              '--execute',
+              'cutover_performed',
+              'source_deleted',
+              'manual_cutover_required',
+              'AES-256-GCM',
+              'source_sha256',
+              'verify_status',
+              'secret_values_exposed',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit('Migration safeguards missing: ' + ', '.join(missing))
+          forbidden = [
+              'delete_object(',
+              'shutil.rmtree(',
+              'unlink()',
+              "update_file('content/storage_config.json'",
+          ]
+          hits = [x for x in forbidden if x in text]
+          if hits:
+              raise SystemExit('Unsafe migration side effect detected: ' + ', '.join(hits))
+          print('Migration script is dry-run by default and cannot delete source or auto-cutover')
+          PY
