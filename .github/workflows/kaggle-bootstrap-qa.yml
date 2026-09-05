@@ -1,0 +1,101 @@
+name: Kaggle MASTER CLONE Bootstrap QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kaggle/bootstrap.py'
+      - 'kaggle/preflight.py'
+      - '.github/workflows/kaggle-bootstrap-qa.yml'
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/generate_scene_speech.py'
+      - 'worker/voice_mms_openvoice.py'
+      - 'content/clone_quality_gate_v1.json'
+      - 'content/clone_release_policy_v1.json'
+      - 'content/clone_duration_gate_policy_v1.json'
+  pull_request:
+    paths:
+      - 'kaggle/bootstrap.py'
+      - 'kaggle/preflight.py'
+      - '.github/workflows/kaggle-bootstrap-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax check
+        run: |
+          python -m py_compile kaggle/bootstrap.py kaggle/preflight.py
+      - name: Assert one-command bootstrap contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('kaggle/bootstrap.py').read_text(encoding='utf-8')
+          required = [
+              'torch==2.0.1+cu118',
+              'mmcv==2.0.1',
+              'cu118/torch2.0/index.html',
+              'mmdet==3.1.0',
+              'mmpose==1.1.0',
+              'myshell-ai/OpenVoice.git',
+              'TMElyralab/MuseTalk.git',
+              'paid_gpu_started_by_bootstrap',
+              'biometric_media_uploaded_by_bootstrap',
+              'auto_promote',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Kaggle bootstrap contract weakened: {missing}')
+          print('Bootstrap contract present')
+          PY
+      - name: Assert fail-closed preflight contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('kaggle/preflight.py').read_text(encoding='utf-8')
+          required = [
+              'ready_for_render',
+              'render_not_started',
+              'private_biometric_media_touched',
+              'manual_release_gate_required',
+              'first_test_gate_seconds',
+              'zero_identity_regression',
+              'manual_promotion_lock',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Kaggle preflight contract weakened: {missing}')
+          print('Preflight contract present')
+          PY
+      - name: Reject dangerous side effects
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = '\n'.join([
+              Path('kaggle/bootstrap.py').read_text(encoding='utf-8'),
+              Path('kaggle/preflight.py').read_text(encoding='utf-8'),
+          ])
+          forbidden = [
+              'runpodctl create',
+              'create_pod(',
+              'create_endpoint(',
+              'requests.post(',
+              'boto3.client(',
+              'git push',
+              'auto_promote": True',
+              'private_biometric_media_touched": True',
+              'paid_gpu_started_by_bootstrap": True',
+          ]
+          bad = [x for x in forbidden if x in text]
+          if bad:
+              raise SystemExit(f'Dangerous Kaggle side effect detected: {bad}')
+          print('No paid provisioning, upload, promotion, or remote mutation side effects')
+          PY
