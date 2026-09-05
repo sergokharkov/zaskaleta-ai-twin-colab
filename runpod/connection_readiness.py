@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = [
+    '.gitignore',
     'runpod/api_server.py',
     'runpod/preflight.py',
     'runpod/clone_v2_readiness.py',
@@ -29,6 +30,7 @@ REQUIRED = [
     'worker/materialize_clone_runtime_from_s3.py',
     'worker/migrate_clone_storage.py',
     'worker/storage_backend.py',
+    'worker/validate_repo_security_baseline.py',
     'worker/evaluate_clone_release.py',
     'worker/evaluate_identity_view_results.py',
     'worker/compare_clone_challenger.py',
@@ -64,63 +66,47 @@ def main() -> int:
         canonical = cfg.get('canonical_storage') or {}
         runtime = cfg.get('runtime') or {}
         encryption = cfg.get('encryption') or {}
-        if cfg.get('schema') != 'zaskaleta-storage-v2':
-            failures.append('storage_schema_not_v2')
-        if canonical.get('provider') != 's3_compatible':
-            failures.append('canonical_storage_not_s3')
-        if canonical.get('required_region_policy') != 'EU_ONLY':
-            failures.append('storage_not_eu_only')
-        if canonical.get('versioning_required') is not True:
-            failures.append('versioning_not_required')
-        if not canonical.get('migration_manifest_key'):
-            failures.append('runtime_manifest_key_missing')
-        if runtime.get('job_scoped_plaintext_materialization_required') is not True:
-            failures.append('job_scoped_materialization_not_required')
-        if runtime.get('delete_temporary_plaintext_after_job') is not True:
-            failures.append('runtime_plaintext_cleanup_not_required')
-        if runtime.get('runtime_attestation_required') is not True:
-            failures.append('runtime_attestation_not_required')
-        if encryption.get('client_side_encryption_required') is not True:
-            failures.append('client_side_encryption_not_required')
-        if (cfg.get('legacy_source_import') or {}).get('production_dependency') is not False:
-            failures.append('legacy_drive_production_dependency')
-        if (cfg.get('legacy_canonical_migration') or {}).get('production_dependency') is not False:
-            failures.append('migration_drive_production_dependency')
+        if cfg.get('schema') != 'zaskaleta-storage-v2': failures.append('storage_schema_not_v2')
+        if canonical.get('provider') != 's3_compatible': failures.append('canonical_storage_not_s3')
+        if canonical.get('required_region_policy') != 'EU_ONLY': failures.append('storage_not_eu_only')
+        if canonical.get('versioning_required') is not True: failures.append('versioning_not_required')
+        if not canonical.get('migration_manifest_key'): failures.append('runtime_manifest_key_missing')
+        if runtime.get('job_scoped_plaintext_materialization_required') is not True: failures.append('job_scoped_materialization_not_required')
+        if runtime.get('delete_temporary_plaintext_after_job') is not True: failures.append('runtime_plaintext_cleanup_not_required')
+        if runtime.get('runtime_attestation_required') is not True: failures.append('runtime_attestation_not_required')
+        if encryption.get('client_side_encryption_required') is not True: failures.append('client_side_encryption_not_required')
+        if (cfg.get('legacy_source_import') or {}).get('production_dependency') is not False: failures.append('legacy_drive_production_dependency')
+        if (cfg.get('legacy_canonical_migration') or {}).get('production_dependency') is not False: failures.append('migration_drive_production_dependency')
 
         api = read('runpod/api_server.py')
         runner = read('worker/run_clone_v2_test.py')
         materializer = read('worker/materialize_clone_runtime_from_s3.py')
         provenance = read('worker/validate_lipsync_render_provenance.py')
         requirements = read('runpod/requirements-api.txt')
+        ignore = read('.gitignore')
         promotion = json.loads(read('content/clone_promotion_bundle_policy_v1.json'))
 
         for forbidden in ('AI_TWIN_DRIVE_SYNC', 'AI_TWIN_DRIVE_FOLDER_ID', 'fixed_drive_folder_sync.py', 'GOOGLE_APPLICATION_CREDENTIALS'):
-            if forbidden in api:
-                failures.append('api_legacy_drive_token:' + forbidden)
+            if forbidden in api: failures.append('api_legacy_drive_token:' + forbidden)
         for token in ('--candidate-id', 'CLONE_V2_RENDER_PROVENANCE.json', 'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json'):
-            if token not in runner:
-                failures.append('runner_missing:' + token)
+            if token not in runner: failures.append('runner_missing:' + token)
         for token in ('zaskaleta-lipsync-render-provenance-v2', 'raw_output', 'identity_preflight_sha256', 'candidate_id_missing'):
-            if token not in provenance:
-                failures.append('provenance_validator_missing:' + token)
+            if token not in provenance: failures.append('provenance_validator_missing:' + token)
         for token in ('all_objects_verified', 'cleanup_required_after_job', 'Refusing to materialize private clone assets inside the Git repository'):
-            if token not in materializer:
-                failures.append('materializer_missing:' + token)
-        if 'boto3==' not in requirements or 'cryptography==' not in requirements:
-            failures.append('runtime_storage_dependencies_missing')
-        if 'google-auth' in requirements or 'google-api-python-client' in requirements:
-            failures.append('legacy_google_dependencies_present')
+            if token not in materializer: failures.append('materializer_missing:' + token)
+        for token in ('.env', '*.pem', '*.key', '_runtime_assets/', 'MASTER_CLONE/', 'MASTER_CLONE_ENCRYPTED/'):
+            if token not in ignore: failures.append('gitignore_missing:' + token)
+        if 'boto3==' not in requirements or 'cryptography==' not in requirements: failures.append('runtime_storage_dependencies_missing')
+        if 'google-auth' in requirements or 'google-api-python-client' in requirements: failures.append('legacy_google_dependencies_present')
         rules = promotion.get('rules') or {}
-        if rules.get('candidate_id_required_on_all_artifacts') is not True:
-            failures.append('candidate_id_not_required_on_all_promotion_artifacts')
-        if promotion.get('auto_promote') is not False or promotion.get('manual_promotion_required') is not True:
-            failures.append('promotion_policy_weakened')
-        if float(promotion.get('identity_regression_tolerance', 1)) != 0.0:
-            failures.append('identity_regression_tolerance_not_zero')
+        if rules.get('candidate_id_required_on_all_artifacts') is not True: failures.append('candidate_id_not_required_on_all_promotion_artifacts')
+        if promotion.get('auto_promote') is not False or promotion.get('manual_promotion_required') is not True: failures.append('promotion_policy_weakened')
+        if float(promotion.get('identity_regression_tolerance', 1)) != 0.0: failures.append('identity_regression_tolerance_not_zero')
 
         static_checks = [
             [sys.executable, str(ROOT / 'runpod' / 'clone_v2_readiness.py')],
             [sys.executable, str(ROOT / 'worker' / 'storage_backend.py')],
+            [sys.executable, str(ROOT / 'worker' / 'validate_repo_security_baseline.py')],
         ]
         for cmd in static_checks:
             proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
@@ -129,12 +115,8 @@ def main() -> int:
 
         if args.require_runtime_env:
             env_names = [
-                canonical.get('bucket_env'),
-                canonical.get('endpoint_env'),
-                canonical.get('region_env'),
-                canonical.get('access_key_env'),
-                canonical.get('secret_key_env'),
-                encryption.get('key_env'),
+                canonical.get('bucket_env'), canonical.get('endpoint_env'), canonical.get('region_env'),
+                canonical.get('access_key_env'), canonical.get('secret_key_env'), encryption.get('key_env'),
                 'AI_TWIN_TOKEN',
             ]
             for name in env_names:
@@ -142,9 +124,10 @@ def main() -> int:
                     failures.append('runtime_env_missing:' + str(name))
 
     report = {
-        'schema': 'zaskaleta-clone-external-connection-readiness-v1',
+        'schema': 'zaskaleta-clone-external-connection-readiness-v2',
         'static_ready_for_external_connection_setup': not failures if not args.require_runtime_env else None,
         'runtime_env_ready_for_connection': not failures if args.require_runtime_env else None,
+        'repository_security_baseline_required': True,
         'external_connection_performed': False,
         'network_action_performed': False,
         'paid_gpu_started': False,
