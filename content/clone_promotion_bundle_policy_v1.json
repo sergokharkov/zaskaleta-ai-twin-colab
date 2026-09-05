@@ -39,7 +39,8 @@
   "rules": {
     "all_artifacts_required": true,
     "all_artifact_hashes_required": true,
-    "candidate_id_must_match_across_artifacts_when_present": true,
+    "candidate_id_required_on_all_artifacts": true,
+    "candidate_id_must_match_across_all_artifacts": true,
     "any_identity_failure_blocks_promotion": true,
     "any_temporal_guard_failure_blocks_promotion": true,
     "any_render_provenance_failure_blocks_promotion": true,
