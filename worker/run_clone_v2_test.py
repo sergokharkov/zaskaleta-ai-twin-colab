@@ -6,6 +6,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import cv2
+
+
+TEMPORAL_FACE_SAMPLES = 7
+TEMPORAL_FACE_MIN_PASS_RATIO = 0.85
+TEMPORAL_FACE_MAX_COUNT = 1
+TEMPORAL_FACE_MIN_SHARPNESS = 16.0
+TEMPORAL_FACE_MIN_AREA_RATIO = 0.008
+TEMPORAL_FACE_MAX_AREA_RATIO = 0.36
+
 
 def run(cmd):
     cmd = [str(x) for x in cmd]
@@ -41,6 +51,82 @@ def clamp_tempo(audio_duration: float, target_duration: float, max_correction: f
 def resolve_python() -> Path:
     configured = os.environ.get('AI_TWIN_PYTHON', '').strip()
     return Path(configured) if configured else Path(sys.executable)
+
+
+def temporal_face_guard(video_path: Path) -> dict:
+    """Sample the finished talking render and reject temporal face instability.
+
+    This is intentionally a structural face guard, not an identity recognizer. It catches missing,
+    duplicate, tiny/oversized and severely soft faces across time before manual identity review.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return {'passed': False, 'reason': 'video_open_failed', 'samples': []}
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if frame_count <= 0:
+        cap.release()
+        return {'passed': False, 'reason': 'empty_video', 'samples': []}
+
+    detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    sample_total = min(TEMPORAL_FACE_SAMPLES, frame_count)
+    indices = sorted({int(round(i * (frame_count - 1) / max(sample_total - 1, 1))) for i in range(sample_total)})
+    samples = []
+    passed_samples = 0
+
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            samples.append({'frame': idx, 'passed': False, 'reason': 'frame_read_failed'})
+            continue
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector.detectMultiScale(gray, scaleFactor=1.07, minNeighbors=5, minSize=(48, 48))
+        face_count = int(len(faces))
+        sample = {'frame': idx, 'face_count': face_count}
+
+        if face_count == 0:
+            sample.update({'passed': False, 'reason': 'no_face_detected'})
+        elif face_count > TEMPORAL_FACE_MAX_COUNT:
+            sample.update({'passed': False, 'reason': 'multiple_faces_detected'})
+        else:
+            x, y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
+            area_ratio = float(w * h) / float(frame.shape[0] * frame.shape[1])
+            face_gray = gray[y:y + h, x:x + w]
+            sharpness = float(cv2.Laplacian(face_gray, cv2.CV_64F).var()) if face_gray.size else 0.0
+            area_ok = TEMPORAL_FACE_MIN_AREA_RATIO <= area_ratio <= TEMPORAL_FACE_MAX_AREA_RATIO
+            sharp_ok = sharpness >= TEMPORAL_FACE_MIN_SHARPNESS
+            passed = bool(area_ok and sharp_ok)
+            reason = 'ok' if passed else ('face_size_out_of_range' if not area_ok else 'face_too_soft')
+            sample.update({
+                'passed': passed,
+                'reason': reason,
+                'face_area_ratio': round(area_ratio, 6),
+                'face_sharpness': round(sharpness, 3),
+                'face_box': [int(x), int(y), int(w), int(h)],
+            })
+            if passed:
+                passed_samples += 1
+
+        samples.append(sample)
+
+    cap.release()
+    total = len(samples)
+    pass_ratio = float(passed_samples) / float(total) if total else 0.0
+    passed = total > 0 and pass_ratio >= TEMPORAL_FACE_MIN_PASS_RATIO
+    return {
+        'schema': 'zaskaleta-clone-v2-temporal-face-guard-v1',
+        'passed': passed,
+        'reason': 'ok' if passed else 'temporal_face_instability',
+        'sample_count': total,
+        'passed_samples': passed_samples,
+        'pass_ratio': round(pass_ratio, 6),
+        'required_pass_ratio': TEMPORAL_FACE_MIN_PASS_RATIO,
+        'max_face_count': TEMPORAL_FACE_MAX_COUNT,
+        'samples': samples,
+        'note': 'Structural guard only; downstream identity similarity and manual review remain mandatory.',
+    }
 
 
 def main():
@@ -176,6 +262,15 @@ def main():
     if final_duration < seconds - 0.35:
         raise RuntimeError(f'Clone v2 duration gate failed: {final_duration:.2f}s vs requested {seconds:.2f}s')
 
+    temporal_guard = temporal_face_guard(final)
+    temporal_guard_path = out / 'CLONE_V2_TEMPORAL_FACE_GUARD.json'
+    temporal_guard_path.write_text(json.dumps(temporal_guard, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    if not temporal_guard.get('passed'):
+        raise RuntimeError(
+            f"Clone v2 temporal face guard failed: pass_ratio={temporal_guard.get('pass_ratio')} "
+            f"required={temporal_guard.get('required_pass_ratio')}"
+        )
+
     evaluation = {
         'clone_version': 'v2',
         'talking_profile': talking_profile['name'],
@@ -189,11 +284,17 @@ def main():
         'final_duration': final_duration,
         'speech_duration_before_alignment': audio_duration,
         'tempo_correction': tempo,
+        'temporal_face_guard': {
+            'path': temporal_guard_path.name,
+            'passed': temporal_guard['passed'],
+            'pass_ratio': temporal_guard['pass_ratio'],
+            'required_pass_ratio': temporal_guard['required_pass_ratio'],
+        },
         'runtime': {'python': str(python_bin), 'root': str(root), 'storage': str(Path(args.mydrive).resolve())},
         'must_pass': talking_profile['test_gate']['must_pass'],
         'manual_review': {item: None for item in talking_profile['test_gate']['must_pass']},
         'approved_for_next_gate': False,
-        'notes': 'Set every manual_review item to true before promoting this output to APPROVED or moving to the 15-30s gate.'
+        'notes': 'Set every manual_review item to true before promoting this output to APPROVED or moving to the 15-30s gate. Temporal guard is structural only and never replaces identity review.'
     }
     eval_path = out / 'CLONE_V2_EVALUATION.json'
     eval_path.write_text(json.dumps(evaluation, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -201,6 +302,7 @@ def main():
     print('\n✅ CLONE V2 TALKING TEST READY')
     print('FINAL_PATH=' + str(final))
     print('EVALUATION_PATH=' + str(eval_path))
+    print('TEMPORAL_FACE_GUARD_PATH=' + str(temporal_guard_path))
     print(f'DURATION={final_duration:.2f}')
     print('⚠️ Do not add this generation to APPROVED until every manual gate is reviewed.')
 
