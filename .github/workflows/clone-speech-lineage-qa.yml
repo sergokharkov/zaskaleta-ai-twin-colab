@@ -1,0 +1,169 @@
+name: Clone Speech Lineage QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/clone_speech_lineage_policy_v1.json'
+      - 'worker/validate_clone_speech_lineage.py'
+      - 'worker/generate_scene_speech.py'
+      - '.github/workflows/clone-speech-lineage-qa.yml'
+  pull_request:
+    paths:
+      - 'content/clone_speech_lineage_policy_v1.json'
+      - 'worker/validate_clone_speech_lineage.py'
+      - 'worker/generate_scene_speech.py'
+      - '.github/workflows/clone-speech-lineage-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python syntax sanity
+        run: python -m py_compile worker/validate_clone_speech_lineage.py
+      - name: Validate positive and fail-closed speech lineage cases
+        run: |
+          python - <<'PY'
+          import copy, hashlib, json, subprocess, sys, tempfile, wave
+          from pathlib import Path
+
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          def run(manifest, master):
+              return subprocess.run([
+                  sys.executable, 'worker/validate_clone_speech_lineage.py',
+                  '--manifest', str(manifest), '--master-voice', str(master)
+              ], capture_output=True, text=True)
+
+          with tempfile.TemporaryDirectory() as td_raw:
+              td = Path(td_raw)
+              master = td / 'Zaskaleta_AI_Voice_Master.mp3'
+              master.write_bytes(b'synthetic-ci-master-voice-not-real-biometric')
+              audio = td / 'scene_01_clone.wav'
+              with wave.open(str(audio), 'wb') as wf:
+                  wf.setnchannels(1)
+                  wf.setsampwidth(2)
+                  wf.setframerate(24000)
+                  wf.writeframes(b'\x00\x00' * 2400)
+
+              base = {
+                  'schema': 'zaskaleta-scene-speech-manifest-v2',
+                  'master_voice_sha256': sha(master),
+                  'normalized_reference_sha256': 'd' * 64,
+                  'final_audio_contract': {
+                      'sample_rate_hz': 24000,
+                      'channels': 1,
+                      'loop_or_repeat_allowed': False,
+                  },
+                  'scenes': [{
+                      'scene': 1,
+                      'speaker': 'AI_CLONE',
+                      'text': 'Synthetic CI speech.',
+                      'audio': audio.name,
+                      'audio_sha256': sha(audio),
+                      'sample_rate_hz': 24000,
+                      'channels': 1,
+                      'talking': True,
+                      'mode': 'talking',
+                      'voice_preset': 'conversational',
+                      'master_voice_sha256': sha(master),
+                      'loop_or_repeat_used': False,
+                  }],
+              }
+
+              good = td / 'manifest-good.json'
+              good.write_text(json.dumps(base), encoding='utf-8')
+              result = run(good, master)
+              if result.returncode != 0:
+                  raise SystemExit('Valid speech lineage rejected:\n' + result.stdout + result.stderr)
+
+              bad_master = copy.deepcopy(base)
+              bad_master['master_voice_sha256'] = '0' * 64
+              bad_master['scenes'][0]['master_voice_sha256'] = '0' * 64
+              p = td / 'manifest-bad-master.json'
+              p.write_text(json.dumps(bad_master), encoding='utf-8')
+              if run(p, master).returncode == 0:
+                  raise SystemExit('Runtime master voice hash mismatch was accepted')
+
+              bad_audio = copy.deepcopy(base)
+              bad_audio['scenes'][0]['audio_sha256'] = '1' * 64
+              p = td / 'manifest-bad-audio.json'
+              p.write_text(json.dumps(bad_audio), encoding='utf-8')
+              if run(p, master).returncode == 0:
+                  raise SystemExit('Runtime generated audio hash mismatch was accepted')
+
+              wrong_master_name = td / 'voice.mp3'
+              wrong_master_name.write_bytes(master.read_bytes())
+              if run(good, wrong_master_name).returncode == 0:
+                  raise SystemExit('Non-canonical master voice filename was accepted')
+
+              bad_secret = copy.deepcopy(base)
+              bad_secret['metadata'] = {'nested': {'client_secret': 'forbidden'}}
+              p = td / 'manifest-secret.json'
+              p.write_text(json.dumps(bad_secret), encoding='utf-8')
+              if run(p, master).returncode == 0:
+                  raise SystemExit('Nested secret material was accepted')
+
+              bad_loop = copy.deepcopy(base)
+              bad_loop['scenes'][0]['loop_or_repeat_used'] = True
+              p = td / 'manifest-loop.json'
+              p.write_text(json.dumps(bad_loop), encoding='utf-8')
+              if run(p, master).returncode == 0:
+                  raise SystemExit('Loop/repeat usage was accepted')
+
+              bad_format = copy.deepcopy(base)
+              stereo = td / 'scene_stereo.wav'
+              with wave.open(str(stereo), 'wb') as wf:
+                  wf.setnchannels(2)
+                  wf.setsampwidth(2)
+                  wf.setframerate(24000)
+                  wf.writeframes(b'\x00\x00\x00\x00' * 1200)
+              bad_format['scenes'][0]['audio'] = stereo.name
+              bad_format['scenes'][0]['audio_sha256'] = sha(stereo)
+              bad_format['scenes'][0]['channels'] = 2
+              p = td / 'manifest-stereo.json'
+              p.write_text(json.dumps(bad_format), encoding='utf-8')
+              if run(p, master).returncode == 0:
+                  raise SystemExit('Stereo clone speech was accepted')
+
+          print('Clone speech lineage validator is fail-closed')
+          PY
+      - name: Assert generator provenance contract remains present
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('worker/generate_scene_speech.py').read_text(encoding='utf-8')
+          required = [
+              'sha256_file',
+              'master_voice_sha256',
+              'normalized_reference_sha256',
+              'audio_sha256',
+              "'loop_or_repeat_used': False",
+              "'sample_rate_hz': FINAL_SAMPLE_RATE",
+              "'channels': FINAL_CHANNELS",
+          ]
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit(f'Speech provenance contract weakened: {missing}')
+          print('Generator speech provenance contract present')
+          PY
+      - name: Ensure no raw biometric or secret material is embedded
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for path in [Path('content/clone_speech_lineage_policy_v1.json'), Path('worker/validate_clone_speech_lineage.py')]:
+              text = path.read_text(encoding='utf-8')
+              for marker in ('BEGIN PRIVATE KEY-----', 'aws_secret_access_key=REAL', 'AI_TWIN_DATA_ENCRYPTION_KEY=REAL'):
+                  if marker in text:
+                      raise SystemExit(f'Embedded secret material in {path}')
+          print('No embedded biometric payload or real secret material')
+          PY
