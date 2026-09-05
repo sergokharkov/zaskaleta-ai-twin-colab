@@ -66,6 +66,11 @@ def main():
     parser.add_argument('--reference-video', default='')
     parser.add_argument('--audio', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument(
+        '--allow-photo-fallback',
+        action='store_true',
+        help='Explicitly allow a static-photo fallback if the approved motion reference fails. Disabled by default for MASTER CLONE safety.',
+    )
     args = parser.parse_args()
 
     root = pathlib.Path(os.environ.get('MUSETALK_ROOT', '/content/MuseTalk')).resolve()
@@ -81,11 +86,14 @@ def main():
         raise FileNotFoundError(photo)
     if not audio.is_file():
         raise FileNotFoundError(audio)
+    if reference is None or not reference.is_file():
+        raise FileNotFoundError(
+            f'Approved reference video is required for MASTER CLONE lipsync: {reference}'
+        )
 
-    media_candidates = []
-    if reference and reference.is_file():
-        media_candidates.append(('animated-reference', reference))
-    media_candidates.append(('keyframe-fallback', photo))
+    media_candidates = [('approved-animated-reference', reference)]
+    if args.allow_photo_fallback:
+        media_candidates.append(('explicit-keyframe-fallback', photo))
 
     model_dir = root / 'models' / 'musetalkV15'
     failures = []
@@ -104,7 +112,7 @@ def main():
             write_config(config, local_media, local_audio)
 
             # T4 normally benefits from batch 8. If VRAM is insufficient, retry the
-            # same media automatically with batch 4 rather than failing the whole day.
+            # same approved media automatically with batch 4 rather than changing identity/motion input.
             for batch_size in (8, 4):
                 attempt_results = attempt_dir / f'results_b{batch_size}'
                 attempt_results.mkdir(parents=True, exist_ok=True)
@@ -127,13 +135,17 @@ def main():
                 tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-7000:]
                 failures.append(f'{label}/batch{batch_size}: returncode={result.returncode}\n{tail}')
                 if batch_size == 8:
-                    print('⚠️ Batch 8 failed; retrying batch 4 automatically.')
+                    print('⚠️ Batch 8 failed; retrying batch 4 with the same approved reference.')
                 else:
-                    print(f'⚠️ MuseTalk {label} did not produce MP4; trying fallback media if available.')
+                    print(f'⚠️ MuseTalk {label} did not produce MP4.')
                 print(tail[-2500:])
 
+    fallback_note = (
+        ' Photo fallback was explicitly enabled.' if args.allow_photo_fallback
+        else ' Static-photo fallback is disabled; refusing to replace approved motion implicitly.'
+    )
     raise RuntimeError(
-        'MuseTalk failed for all media candidates. Log tail:\n' +
+        'MuseTalk failed for all allowed media candidates.' + fallback_note + '\nLog tail:\n' +
         '\n\n===== NEXT ATTEMPT =====\n\n'.join(failures)[-12000:]
     )
 
