@@ -78,6 +78,52 @@ jobs:
 
           print('Clone policy invariants OK: zero identity regression, immutable stable release, manual promotion only')
           PY
+      - name: Enforce render policy at runtime
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+
+          guard = json.loads(Path('content/render_face_guard_v1.json').read_text(encoding='utf-8'))
+          source_path = Path('worker/generate_scene_keyframes.py')
+          tree = ast.parse(source_path.read_text(encoding='utf-8'))
+          constants = {}
+          for node in tree.body:
+              if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                  try:
+                      constants[node.targets[0].id] = ast.literal_eval(node.value)
+                  except Exception:
+                      pass
+
+          expected = {
+              'IDENTITY_SCALE': float(guard['identity_scale']),
+              'DEFAULT_ATTEMPTS': int(guard['attempts']),
+              'MIN_FACE_AREA_RATIO': float(guard['face_area_ratio_min']),
+              'MAX_FACE_AREA_RATIO': float(guard['face_area_ratio_max']),
+              'MIN_FACE_SHARPNESS': float(guard['face_sharpness_min']),
+              'MAX_FACE_COUNT': int(guard['max_face_count']),
+          }
+          for name, value in expected.items():
+              actual = constants.get(name)
+              if actual != value:
+                  raise SystemExit(f'{name} runtime mismatch: code={actual!r} policy={value!r}')
+
+          text = source_path.read_text(encoding='utf-8')
+          required_runtime_guards = [
+              'multiple_faces_detected',
+              'no_face_detected',
+              'face_size_out_of_range',
+              'face_too_soft',
+              'REJECTED_BEFORE_SAVE',
+              'CANONICAL IDENTITY LOCK',
+          ]
+          missing = [token for token in required_runtime_guards if token not in text]
+          if missing:
+              raise SystemExit('Missing runtime identity guard tokens: ' + ', '.join(missing))
+
+          print('Render runtime matches render_face_guard_v1 exactly')
+          PY
       - name: Python syntax sanity
         run: |
           python -m py_compile \
