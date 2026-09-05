@@ -1,0 +1,39 @@
+{
+  "schema": "zaskaleta-clone-release-policy-v1",
+  "purpose": "Compare a challenger clone against the current stable clone before manual promotion.",
+  "manual_promotion_required": true,
+  "auto_promote": false,
+  "identity_regression_tolerance": 0.0,
+  "metric_regression_tolerances": {
+    "lip_sync": 0.01,
+    "voice_similarity": 0.01,
+    "motion_naturalness": 0.02,
+    "artifact_score": 0.01,
+    "face_occlusion_ratio": 0.01
+  },
+  "higher_is_better": [
+    "identity_similarity",
+    "lip_sync",
+    "voice_similarity",
+    "motion_naturalness"
+  ],
+  "lower_is_better": [
+    "identity_drift",
+    "artifact_score",
+    "face_occlusion_ratio"
+  ],
+  "identity_metrics": [
+    "identity_similarity",
+    "identity_drift"
+  ],
+  "required_candidate_decision": "PASS_TO_MANUAL_REVIEW",
+  "promotion_decision": "ELIGIBLE_FOR_MANUAL_PROMOTION",
+  "blocked_decision": "BLOCK_PROMOTION",
+  "rules": [
+    "The challenger must first pass clone_quality_gate_v1.",
+    "Identity may never regress versus the stable release.",
+    "Small bounded regressions in non-identity metrics are tolerated only to avoid noise-driven rejection.",
+    "A challenger is never promoted automatically.",
+    "The stable release is immutable and must remain available for rollback."
+  ]
+}
