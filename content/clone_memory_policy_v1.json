@@ -1,0 +1,43 @@
+{
+  "schema": "zaskaleta-clone-memory-policy-v1",
+  "root": "MASTER_CLONE/MEMORY",
+  "mode": "append_only_versioned",
+  "domains": [
+    "identity_memory",
+    "voice_memory",
+    "motion_memory",
+    "talking_memory",
+    "failure_memory",
+    "release_history",
+    "quality_history",
+    "provenance"
+  ],
+  "rules": {
+    "generated_material_requires_explicit_approval_before_learning": true,
+    "rejected_material_never_becomes_reference": true,
+    "stable_memory_entries_immutable": true,
+    "append_only_event_log_required": true,
+    "every_entry_requires_sha256_provenance": true,
+    "every_entry_requires_source_type": true,
+    "every_entry_requires_created_at": true,
+    "every_entry_requires_decision": true,
+    "manual_promotion_required": true,
+    "automatic_self_training_forbidden": true,
+    "raw_biometric_payloads_forbidden_in_memory_json": true,
+    "secrets_forbidden_in_memory": true
+  },
+  "decision_values": ["CANDIDATE", "APPROVED", "REJECTED", "SUPERSEDED"],
+  "required_entry_fields": [
+    "memory_id",
+    "domain",
+    "version",
+    "source_type",
+    "source_ref",
+    "source_sha256",
+    "created_at",
+    "decision",
+    "notes"
+  ],
+  "identity_rule": "No memory update may weaken zero identity regression or replace the canonical identity anchor.",
+  "failure_rule": "Failures are retained as non-training negative knowledge and must never be promoted into reference pools."
+}
