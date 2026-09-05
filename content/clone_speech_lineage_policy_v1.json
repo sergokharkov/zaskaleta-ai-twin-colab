@@ -1,0 +1,31 @@
+{
+  "schema": "zaskaleta-clone-speech-lineage-policy-v1",
+  "manifest_schema": "zaskaleta-scene-speech-manifest-v2",
+  "canonical_master_voice_filename": "Zaskaleta_AI_Voice_Master.mp3",
+  "canonical_master_voice_source_ref": "MASTER_CLONE/VOICE/Zaskaleta_AI_Voice_Master.mp3",
+  "required_final_audio": {
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "loop_or_repeat_allowed": false
+  },
+  "allowed_speakers": ["AI_CLONE"],
+  "allowed_modes": ["silent", "talking", "voiceover"],
+  "allowed_voice_presets": ["calm", "confident", "serious", "warm", "motivational", "conversational"],
+  "rules": {
+    "master_voice_file_must_exist": true,
+    "master_voice_filename_must_match_canonical": true,
+    "master_voice_sha256_must_match_runtime_file": true,
+    "master_voice_sha256_must_match_every_scene": true,
+    "generated_audio_sha256_must_match_runtime_file": true,
+    "generated_audio_must_be_24khz_mono_wav": true,
+    "loop_or_repeat_forbidden": true,
+    "silent_scene_must_not_reference_audio": true,
+    "non_silent_scene_must_reference_audio": true,
+    "raw_voice_payload_forbidden_in_manifest": true,
+    "raw_biometric_payload_forbidden_in_manifest": true,
+    "secret_material_forbidden_in_manifest": true,
+    "automatic_voice_identity_substitution_forbidden": true,
+    "manual_clone_release_gate_still_required": true
+  },
+  "note": "The speech manifest proves file lineage and audio integrity only. It does not prove perceptual voice similarity or release quality; those remain manual/quality-gate decisions."
+}
