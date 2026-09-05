@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import secrets
@@ -8,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -16,10 +16,20 @@ STORAGE_ROOT = Path(os.environ.get('AI_TWIN_STORAGE', '/workspace/zaskaleta-stor
 OUTPUT_ROOT = Path(os.environ.get('AI_TWIN_OUTPUT', STORAGE_ROOT / 'api_jobs')).resolve()
 API_TOKEN = os.environ.get('AI_TWIN_TOKEN', '').strip()
 PYTHON_BIN = os.environ.get('AI_TWIN_PYTHON', sys.executable)
+CANONICAL_DRIVE_FOLDER_ID = os.environ.get('AI_TWIN_DRIVE_FOLDER_ID', '1_7G-rAGQ80Vpe_CWdGOzPIg0nuprDp3s').strip()
+DRIVE_SYNC_ENABLED = os.environ.get('AI_TWIN_DRIVE_SYNC', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
+CORS_ORIGINS = [x.strip() for x in os.environ.get('AI_TWIN_CORS_ORIGINS', 'https://ai.zaskaleta.net').split(',') if x.strip()]
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.1.0')
+app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.2.0')
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=['GET', 'POST', 'OPTIONS'],
+    allow_headers=['Authorization', 'Content-Type'],
+)
 
 
 class Profile(BaseModel):
@@ -41,7 +51,7 @@ class RenderRequest(BaseModel):
 
 def auth(authorization: str | None):
     if not API_TOKEN:
-        return
+        raise HTTPException(status_code=503, detail='AI_TWIN_TOKEN is not configured')
     expected = f'Bearer {API_TOKEN}'
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail='Unauthorized')
@@ -65,9 +75,24 @@ def write_state(job_id: str, **changes):
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def pull_canonical_drive(job_id: str):
+    if not DRIVE_SYNC_ENABLED:
+        return
+    write_state(job_id, status='processing', stage='storage_sync')
+    cmd = [
+        PYTHON_BIN,
+        str(APP_ROOT / 'worker' / 'fixed_drive_folder_sync.py'),
+        'pull',
+        '--folder-id', CANONICAL_DRIVE_FOLDER_ID,
+        '--local-dir', str(STORAGE_ROOT),
+    ]
+    subprocess.run(cmd, check=True, env=os.environ.copy())
+
+
 def run_job(job_id: str, req: RenderRequest):
     job_dir = OUTPUT_ROOT / job_id
     try:
+        pull_canonical_drive(job_id)
         write_state(job_id, status='processing', stage='voice')
         cmd = [
             PYTHON_BIN,
@@ -108,9 +133,14 @@ def health():
     return {
         'ok': True,
         'service': 'zaskaleta-ai-clone',
+        'version': '0.2.0',
         'root_exists': APP_ROOT.exists(),
         'storage_exists': STORAGE_ROOT.exists(),
         'python': PYTHON_BIN,
+        'auth_configured': bool(API_TOKEN),
+        'drive_sync_enabled': DRIVE_SYNC_ENABLED,
+        'canonical_drive_folder_configured': bool(CANONICAL_DRIVE_FOLDER_ID),
+        'cors_origins': CORS_ORIGINS,
         'gpu_expected': True,
     }
 
@@ -120,6 +150,8 @@ def render(req: RenderRequest, background_tasks: BackgroundTasks, authorization:
     auth(authorization)
     if not req.script.strip():
         raise HTTPException(status_code=400, detail='script is required')
+    if req.voicePreset not in {'calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'}:
+        raise HTTPException(status_code=400, detail='unsupported voicePreset')
     job_id = uuid.uuid4().hex
     write_state(job_id, status='queued', stage='queued', request={'profile': req.profile.model_dump(), 'seconds': req.seconds, 'voicePreset': req.voicePreset, 'scene': req.scene})
     background_tasks.add_task(run_job, job_id, req)
