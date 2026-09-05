@@ -1,0 +1,33 @@
+{
+  "schema": "zaskaleta-storage-cutover-policy-v1",
+  "from_provider": "google_drive_legacy",
+  "to_provider": "s3_compatible",
+  "rules": {
+    "manual_cutover_required": true,
+    "automatic_cutover_forbidden": true,
+    "all_objects_must_be_uploaded": true,
+    "all_objects_must_be_verified": true,
+    "source_and_decrypted_destination_sha256_must_match": true,
+    "restore_test_must_pass": true,
+    "backup_copy_must_be_verified": true,
+    "runtime_credentials_must_be_complete": true,
+    "client_side_encryption_must_be_enabled": true,
+    "versioning_must_be_enabled": true,
+    "eu_region_policy_must_pass": true,
+    "source_deletion_forbidden_during_cutover": true,
+    "rollback_plan_required": true,
+    "google_drive_may_only_be_disabled_after_manual_cutover": true
+  },
+  "required_evidence": [
+    "migration_manifest_sha256",
+    "expected_object_count",
+    "verified_object_count",
+    "failed_object_count",
+    "restore_evaluation_sha256",
+    "backup_verification",
+    "runtime_storage_readiness",
+    "rollback_target",
+    "decision"
+  ],
+  "decision_values": ["PASS_TO_MANUAL_CUTOVER", "BLOCK_CUTOVER"]
+}
