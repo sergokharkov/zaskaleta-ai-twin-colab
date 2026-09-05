@@ -1,0 +1,51 @@
+name: Clone Policy QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/user_video_candidates_*.json'
+      - 'worker/validate_candidate_registry.py'
+      - '.github/workflows/clone-policy-qa.yml'
+  pull_request:
+    paths:
+      - 'content/user_video_candidates_*.json'
+      - 'worker/validate_candidate_registry.py'
+      - '.github/workflows/clone-policy-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-learning-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate candidate registries
+        run: python worker/validate_candidate_registry.py
+      - name: Reject raw biometric media tracked by Git
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+
+          media_exts = {'.mp4', '.mov', '.m4v', '.webm', '.wav', '.m4a', '.mp3', '.jpg', '.jpeg', '.png', '.webp'}
+          allowed_generated_prefixes = ('outputs/', 'examples/')
+          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          offenders = []
+          for item in tracked:
+              path = Path(item)
+              if path.suffix.lower() not in media_exts:
+                  continue
+              normalized = item.replace('\\', '/')
+              if normalized.startswith(allowed_generated_prefixes):
+                  continue
+              offenders.append(item)
+          if offenders:
+              raise SystemExit('Raw/private media must not be tracked in GitHub: ' + ', '.join(offenders))
+          print('No raw/private biometric media files are tracked by Git')
+          PY
