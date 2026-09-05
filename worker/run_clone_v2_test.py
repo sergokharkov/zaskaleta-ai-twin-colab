@@ -1,6 +1,8 @@
 import argparse
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -27,25 +29,38 @@ def clamp_tempo(audio_duration: float, target_duration: float, max_correction: f
     return max(lo, min(hi, raw))
 
 
+def resolve_python() -> Path:
+    """Use an explicitly configured Python on RunPod/servers, otherwise current interpreter.
+
+    Legacy Colab can still set AI_TWIN_PYTHON=/content/ai-twin-py311/bin/python.
+    """
+    configured = os.environ.get('AI_TWIN_PYTHON', '').strip()
+    return Path(configured) if configured else Path(sys.executable)
+
+
 def main():
     ap = argparse.ArgumentParser(description='Clone v2 talking realism test with gated duration and aligned lipsync audio')
     ap.add_argument('--root', required=True)
-    ap.add_argument('--mydrive', required=True)
+    ap.add_argument('--mydrive', required=True, help='Storage root. Can be Google Drive mount, RunPod volume, or synchronized workspace.')
     ap.add_argument('--seconds', type=float, default=12.0)
     ap.add_argument('--voice-preset', default='conversational', choices=['calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'])
     ap.add_argument('--text', default='Я говорю спокійно і природно. Кожна пауза має виглядати так, ніби слова справді вимовляю я. Без поспіху, без зайвих рухів, просто жива розмова.')
     ap.add_argument('--output-dir', default=None)
     args = ap.parse_args()
 
-    root = Path(args.root)
+    root = Path(args.root).resolve()
     worker = root / 'worker'
     content = root / 'content'
-    python_bin = Path('/content/ai-twin-py311/bin/python')
+    python_bin = resolve_python()
     profile = content / 'clone_reference_profile.json'
     talking_profile = json.loads((content / 'talking_profile_v2.json').read_text(encoding='utf-8'))
 
-    out = Path(args.output_dir) if args.output_dir else Path(args.mydrive) / 'clone_v2_tests'
+    out = Path(args.output_dir).resolve() if args.output_dir else Path(args.mydrive).resolve() / 'clone_v2_tests'
     out.mkdir(parents=True, exist_ok=True)
+
+    print(f'🐍 Python: {python_bin}')
+    print(f'📦 Root: {root}')
+    print(f'💾 Storage: {Path(args.mydrive).resolve()}')
 
     asset_map = out / 'clone_assets_v2.json'
     run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile, '--output', asset_map])
@@ -75,8 +90,6 @@ def main():
     canonical_name = assets.get('profile', {}).get('canonical_identity_photo')
     canonical = next((p for p in photos if p.name == canonical_name), photos[0])
 
-    # Use a short approved real behavior segment. We keep real head/eye/shoulder motion;
-    # scene appearance is not learned and is not part of the clone package.
     ref_video = out / 'clone_v2_behavior_gate.mp4'
     run([
         'ffmpeg', '-y', '-loglevel', 'error', '-i', behavior,
@@ -96,24 +109,10 @@ def main():
     episode = out / 'test_episode_v2.json'
     manifest = out / 'test_manifest_v2.json'
     episode.write_text(json.dumps({'voiceover': args.text}, ensure_ascii=False, indent=2), encoding='utf-8')
-    manifest.write_text(json.dumps({
-        'scenes': [{
-            'n': 1,
-            'seconds': seconds,
-            'prompt': 'MASTER CLONE talking test only. Preserve approved real motion and identity. No scene generation.',
-            'dialogue': []
-        }]
-    }, ensure_ascii=False, indent=2), encoding='utf-8')
+    manifest.write_text(json.dumps({'scenes': [{'n': 1, 'seconds': seconds, 'prompt': 'MASTER CLONE talking test only. Preserve approved real motion and identity. No scene generation.', 'dialogue': []}]}, ensure_ascii=False, indent=2), encoding='utf-8')
 
     speech_dir = out / 'speech'
-    run([
-        python_bin, worker / 'generate_scene_speech.py',
-        '--episode', episode,
-        '--manifest', manifest,
-        '--master-voice', master_voice,
-        '--output-dir', speech_dir,
-        '--voice-preset', args.voice_preset,
-    ])
+    run([python_bin, worker / 'generate_scene_speech.py', '--episode', episode, '--manifest', manifest, '--master-voice', master_voice, '--output-dir', speech_dir, '--voice-preset', args.voice_preset])
 
     audio = speech_dir / 'scene_01_clone.wav'
     if not audio.is_file():
@@ -125,34 +124,17 @@ def main():
     tempo = clamp_tempo(audio_duration, target_speech_window, max_correction)
     print(f'🎙️ speech={audio_duration:.2f}s target={target_speech_window:.2f}s tempo_correction={tempo:.4f}')
 
-    # MuseTalk/Whisper analysis is most stable with 16 kHz mono speech. Apply only a small
-    # tempo correction, then pad at the end. Never loop speech or reference motion.
     lipsync_audio = speech_dir / 'scene_01_clone_lipsync_16k.wav'
-    run([
-        'ffmpeg', '-y', '-loglevel', 'error', '-i', audio,
-        '-af', f'atempo={tempo:.6f},apad=pad_dur={seconds:.3f}',
-        '-t', f'{seconds:.3f}', '-ar', '16000', '-ac', '1', lipsync_audio
-    ])
+    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', audio, '-af', f'atempo={tempo:.6f},apad=pad_dur={seconds:.3f}', '-t', f'{seconds:.3f}', '-ar', '16000', '-ac', '1', lipsync_audio])
 
     raw = out / 'CLONE_V2_TALKING_RAW.mp4'
-    run([
-        python_bin, worker / 'lipsync_musetalk.py',
-        '--photo', fallback_photo,
-        '--reference-video', ref_video,
-        '--audio', lipsync_audio,
-        '--output', raw,
-    ])
+    run([python_bin, worker / 'lipsync_musetalk.py', '--photo', fallback_photo, '--reference-video', ref_video, '--audio', lipsync_audio, '--output', raw])
 
     if not raw.is_file() or raw.stat().st_size < 50_000:
         raise RuntimeError('Clone v2 MuseTalk render did not produce a valid MP4')
 
     final = out / 'CLONE_V2_TALKING_TEST.mp4'
-    run([
-        'ffmpeg', '-y', '-loglevel', 'error', '-i', raw,
-        '-vf', 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,format=yuv420p',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
-        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final
-    ])
+    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', raw, '-vf', 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final])
 
     final_duration = probe_duration(final)
     if final_duration < seconds - 0.35:
@@ -168,6 +150,7 @@ def main():
         'final_duration': final_duration,
         'speech_duration_before_alignment': audio_duration,
         'tempo_correction': tempo,
+        'runtime': {'python': str(python_bin), 'root': str(root), 'storage': str(Path(args.mydrive).resolve())},
         'must_pass': talking_profile['test_gate']['must_pass'],
         'manual_review': {item: None for item in talking_profile['test_gate']['must_pass']},
         'approved_for_next_gate': False,
