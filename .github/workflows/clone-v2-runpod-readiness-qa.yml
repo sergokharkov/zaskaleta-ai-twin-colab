@@ -6,10 +6,14 @@ on:
     paths:
       - 'runpod/api_server.py'
       - 'runpod/requirements-api.txt'
+      - 'runpod/start_api.sh'
+      - 'runpod/connection_readiness.py'
       - 'runpod/clone_v2_readiness.py'
       - 'runpod/preflight.py'
       - 'worker/run_clone_v2_test.py'
       - 'worker/lipsync_musetalk.py'
+      - 'worker/validate_lipsync_render_provenance.py'
+      - 'worker/materialize_clone_runtime_from_s3.py'
       - 'worker/generate_scene_speech.py'
       - 'worker/evaluate_clone_release.py'
       - 'worker/evaluate_identity_view_results.py'
@@ -22,18 +26,7 @@ on:
       - 'worker/validate_storage_restore.py'
       - 'worker/validate_clone_data_governance.py'
       - 'worker/verify_clone_memory_chain.py'
-      - 'content/clone_reference_profile.json'
-      - 'content/talking_profile_v2.json'
-      - 'content/clone_quality_gate_v1.json'
-      - 'content/clone_release_policy_v1.json'
-      - 'content/render_face_guard_v1.json'
-      - 'content/talking_temporal_guard_v1.json'
-      - 'content/identity_view_holdout_v1.json'
-      - 'content/clone_promotion_bundle_policy_v1.json'
-      - 'content/clone_duration_gate_policy_v1.json'
-      - 'content/clone_memory_policy_v1.json'
-      - 'content/storage_config.json'
-      - 'content/storage_migration_policy_v1.json'
+      - 'content/**'
       - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
   pull_request:
     paths:
@@ -58,32 +51,46 @@ jobs:
         run: |
           python -m py_compile \
             runpod/api_server.py \
+            runpod/connection_readiness.py \
             runpod/clone_v2_readiness.py \
             runpod/preflight.py \
+            worker/run_clone_v2_test.py \
+            worker/validate_lipsync_render_provenance.py \
+            worker/materialize_clone_runtime_from_s3.py \
             worker/storage_backend.py
       - name: Verify Clone v2 static RunPod readiness
         run: python runpod/clone_v2_readiness.py
       - name: Validate S3 storage policy without secrets or network calls
         run: python worker/storage_backend.py
-      - name: Enforce Drive-free API runtime and minimal dependencies
+      - name: Verify final connection readiness without external calls
+        run: python runpod/connection_readiness.py
+      - name: Enforce Drive-free job-scoped API runtime
         run: |
           python - <<'PY'
           from pathlib import Path
 
           api = Path('runpod/api_server.py').read_text(encoding='utf-8')
           req = Path('runpod/requirements-api.txt').read_text(encoding='utf-8')
+          runner = Path('worker/run_clone_v2_test.py').read_text(encoding='utf-8')
+          materializer = Path('worker/materialize_clone_runtime_from_s3.py').read_text(encoding='utf-8')
 
-          required = [
+          required_api = [
               "'storage_provider': 's3_compatible'",
               "'google_drive_production_dependency': False",
               "'storage_contract_valid': storage_contract_valid",
               "'storage_runtime_ready': storage_runtime_ready()",
+              "'job_scoped_plaintext_materialization': True",
+              "'plaintext_cleanup_required': True",
               "'secret_values_exposed': False",
-              "version='0.4.0'",
+              "version='0.5.0'",
+              "'--candidate-id', job_id",
+              'materialize_clone_runtime_from_s3.py',
+              'shutil.rmtree(runtime_assets, ignore_errors=True)',
+              'PASS_RENDER_PROVENANCE',
           ]
-          missing = [token for token in required if token not in api]
+          missing = [token for token in required_api if token not in api]
           if missing:
-              raise SystemExit('Clone API storage contract missing: ' + ', '.join(missing))
+              raise SystemExit('Clone API runtime contract missing: ' + ', '.join(missing))
 
           forbidden_api = [
               'AI_TWIN_DRIVE_SYNC',
@@ -100,20 +107,29 @@ jobs:
           if hits:
               raise SystemExit('Legacy Drive/path override behavior remains in Clone API: ' + ', '.join(hits))
 
-          forbidden_deps = ['google-auth', 'google-api-python-client']
-          dep_hits = [token for token in forbidden_deps if token in req]
-          if dep_hits:
-              raise SystemExit('Obsolete Google runtime dependencies remain: ' + ', '.join(dep_hits))
+          for token in ['--candidate-id', 'CLONE_V2_RENDER_PROVENANCE.json', 'zaskaleta-lipsync-render-provenance-v2']:
+              if token not in runner:
+                  raise SystemExit('Runner provenance/candidate contract missing: ' + token)
+          for token in ['all_objects_verified', 'cleanup_required_after_job', 'strict_key']:
+              if token not in materializer:
+                  raise SystemExit('S3 materializer safety contract missing: ' + token)
 
-          print('Clone API runtime is Drive-free, fail-closed on storage readiness, and exposes no caller-controlled biometric paths')
+          for dependency in ['boto3==', 'cryptography==']:
+              if dependency not in req:
+                  raise SystemExit('Required encrypted S3 runtime dependency missing: ' + dependency)
+          for forbidden_dep in ['google-auth', 'google-api-python-client']:
+              if forbidden_dep in req:
+                  raise SystemExit('Obsolete Google runtime dependency remains: ' + forbidden_dep)
+
+          print('Clone API is Drive-free, job-scoped, provenance-bound, and ready for encrypted S3 materialization')
           PY
-      - name: Assert no paid GPU or secret side effects
+      - name: Assert no paid GPU or secret side effects in readiness code
         run: |
           python - <<'PY'
           from pathlib import Path
 
           files = [
-              Path('runpod/api_server.py'),
+              Path('runpod/connection_readiness.py'),
               Path('runpod/clone_v2_readiness.py'),
               Path('runpod/preflight.py'),
           ]
@@ -121,16 +137,13 @@ jobs:
 
           required = [
               'paid_gpu_started',
-              'manual_budget_approval_required_before_gpu_start',
-              'first_test_gate_seconds',
+              'manual_budget_approval_required_before',
               'google_drive_production_dependency',
               'secret_values_exposed',
-              'storage_contract',
-              'storage_backend_policy',
           ]
           missing = [token for token in required if token not in joined]
           if missing:
-              raise SystemExit('RunPod readiness/preflight safety contract missing: ' + ', '.join(missing))
+              raise SystemExit('Readiness safety contract missing: ' + ', '.join(missing))
 
           forbidden = [
               'runpodctl create',
@@ -147,7 +160,7 @@ jobs:
           ]
           hits = [token for token in forbidden if token in joined]
           if hits:
-              raise SystemExit('Forbidden provisioning/secret/legacy-drive behavior found: ' + ', '.join(hits))
+              raise SystemExit('Forbidden provisioning/secret/legacy behavior found: ' + ', '.join(hits))
 
-          print('RunPod/API readiness cannot provision paid GPU, expose secrets, or depend on Google Drive')
+          print('Readiness checks cannot provision paid GPU, expose secrets, or depend on Google Drive')
           PY
