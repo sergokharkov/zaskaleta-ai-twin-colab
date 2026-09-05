@@ -1,0 +1,72 @@
+name: Clone v2 RunPod Readiness QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'runpod/clone_v2_readiness.py'
+      - 'runpod/preflight.py'
+      - 'worker/run_clone_v2_test.py'
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/generate_scene_speech.py'
+      - 'worker/evaluate_clone_release.py'
+      - 'worker/evaluate_identity_view_results.py'
+      - 'worker/compare_clone_challenger.py'
+      - 'worker/validate_clone_promotion_bundle.py'
+      - 'worker/validate_clone_duration_progression.py'
+      - 'worker/validate_clone_v2_temporal_output.py'
+      - 'content/clone_reference_profile.json'
+      - 'content/talking_profile_v2.json'
+      - 'content/clone_quality_gate_v1.json'
+      - 'content/clone_release_policy_v1.json'
+      - 'content/render_face_guard_v1.json'
+      - 'content/talking_temporal_guard_v1.json'
+      - 'content/identity_view_holdout_v1.json'
+      - 'content/clone_promotion_bundle_policy_v1.json'
+      - 'content/clone_duration_gate_policy_v1.json'
+      - 'content/storage_config.json'
+      - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
+  pull_request:
+    paths:
+      - 'runpod/clone_v2_readiness.py'
+      - 'runpod/preflight.py'
+      - 'worker/**'
+      - 'content/**'
+      - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile runpod/clone_v2_readiness.py
+      - name: Verify Clone v2 static RunPod readiness
+        run: python runpod/clone_v2_readiness.py
+      - name: Assert no paid GPU side effects
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('runpod/clone_v2_readiness.py').read_text(encoding='utf-8')
+          required = [
+              'paid_gpu_started',
+              'manual_budget_approval_required_before_gpu_start',
+              'ready_for_paid_gpu_consideration',
+              'first_test_gate_seconds',
+          ]
+          missing = [token for token in required if token not in source]
+          if missing:
+              raise SystemExit('RunPod readiness safety contract missing: ' + ', '.join(missing))
+          forbidden = ['runpodctl create', 'runpodctl pod create', 'flash deploy', 'requests.post(']
+          hits = [token for token in forbidden if token in source]
+          if hits:
+              raise SystemExit('Paid/provisioning side effect found in static readiness validator: ' + ', '.join(hits))
+          print('Static readiness validator cannot provision paid GPU resources')
+          PY
