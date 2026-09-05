@@ -1,0 +1,50 @@
+name: Clone Lipsync Reference QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/run_clone_v2_test.py'
+      - '.github/workflows/clone-lipsync-reference-qa.yml'
+  pull_request:
+    paths:
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/run_clone_v2_test.py'
+      - '.github/workflows/clone-lipsync-reference-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lipsync-reference-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python syntax sanity
+        run: python -m py_compile worker/lipsync_musetalk.py worker/run_clone_v2_test.py
+      - name: Enforce approved motion reference by default
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          lipsync = Path('worker/lipsync_musetalk.py').read_text(encoding='utf-8')
+          runner = Path('worker/run_clone_v2_test.py').read_text(encoding='utf-8')
+          required = [
+              '--allow-photo-fallback',
+              'Approved reference video is required for MASTER CLONE lipsync',
+              'Static-photo fallback is disabled; refusing to replace approved motion implicitly.',
+              "media_candidates = [('approved-animated-reference', reference)]",
+          ]
+          missing = [token for token in required if token not in lipsync]
+          if missing:
+              raise SystemExit('Lipsync reference safety weakened: ' + ', '.join(missing))
+          if '--allow-photo-fallback' in runner:
+              raise SystemExit('Clone v2 runner must not opt into static-photo fallback')
+          if "worker / 'lipsync_musetalk.py'" not in runner or "'--reference-video', ref_video" not in runner:
+              raise SystemExit('Clone v2 runner must pass the approved reference video to MuseTalk')
+          print('Clone v2 lipsync fails closed on approved motion reference loss')
+          PY
