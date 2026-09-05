@@ -22,6 +22,7 @@ def main():
     ap.add_argument('--identity-view-evaluation', required=True)
     ap.add_argument('--challenger-comparison', required=True)
     ap.add_argument('--temporal-face-guard', required=True)
+    ap.add_argument('--render-provenance', required=True)
     ap.add_argument('--policy', default='content/clone_promotion_bundle_policy_v1.json')
     ap.add_argument('--output', required=True)
     args = ap.parse_args()
@@ -31,6 +32,7 @@ def main():
         'identity_view_evaluation': Path(args.identity_view_evaluation),
         'challenger_comparison': Path(args.challenger_comparison),
         'temporal_face_guard': Path(args.temporal_face_guard),
+        'render_provenance': Path(args.render_provenance),
         'policy': Path(args.policy),
     }
     missing_files = [name for name, path in paths.items() if not path.is_file()]
@@ -55,6 +57,7 @@ def main():
     identity_eval = docs['identity_view_evaluation']
     challenger = docs['challenger_comparison']
     temporal = docs['temporal_face_guard']
+    render_provenance = docs['render_provenance']
 
     if clone_eval.get('decision') != required['clone_evaluation']['required_decision']:
         blockers.append('clone_evaluation_not_passed')
@@ -79,13 +82,11 @@ def main():
             continue
         if row.get('decision') != 'PASS':
             blockers.append(f'identity_view_failed:{view}')
-        try:
-            drift = float(row.get('identity_drift'))
-        except (TypeError, ValueError):
-            blockers.append(f'identity_drift_missing:{view}')
-        else:
-            if drift > 0.0:
-                blockers.append(f'identity_drift_above_zero:{view}')
+        drift = row.get('identity_drift')
+        if isinstance(drift, bool) or not isinstance(drift, (int, float)):
+            blockers.append(f'identity_drift_invalid_type:{view}')
+        elif float(drift) != 0.0:
+            blockers.append(f'identity_drift_above_zero:{view}')
 
     challenger_policy = required['challenger_comparison']
     if challenger.get('decision') != challenger_policy['required_decision']:
@@ -100,8 +101,16 @@ def main():
     if temporal.get('passed') is not True:
         blockers.append('temporal_face_guard_failed')
 
+    render_policy = required.get('render_provenance') or {}
+    if render_provenance.get('decision') != render_policy.get('required_decision'):
+        blockers.append('render_provenance_not_passed')
+    if render_provenance.get('auto_promote') is not False:
+        blockers.append('render_provenance_auto_promote_not_false')
+    if render_provenance.get('passed') is not True:
+        blockers.append('render_provenance_failed')
+
     candidate_ids = []
-    for doc in (clone_eval, identity_eval, challenger, temporal):
+    for doc in (clone_eval, identity_eval, challenger, temporal, render_provenance):
         candidate_id = doc.get('candidate_id')
         if isinstance(candidate_id, str) and candidate_id.strip():
             candidate_ids.append(candidate_id.strip())
@@ -119,10 +128,11 @@ def main():
         'stable_release_immutable': True,
         'rollback_required': True,
         'zero_identity_regression_enforced': True,
+        'render_provenance_required': True,
         'candidate_id': candidate_ids[0] if candidate_ids and len(set(candidate_ids)) == 1 else None,
         'blockers': blockers,
         'artifact_sha256': hashes,
-        'note': 'This validator never promotes MASTER CLONE. It only verifies that all mandatory evidence is present and consistent before human review.'
+        'note': 'This validator never promotes MASTER CLONE. It only verifies that all mandatory evidence, including render provenance, is present and consistent before human review.'
     }
 
     out = Path(args.output)
