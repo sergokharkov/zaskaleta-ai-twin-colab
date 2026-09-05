@@ -50,7 +50,7 @@ jobs:
         run: python worker/validate_repo_security_baseline.py
       - name: Verify final connection readiness without external calls
         run: python runpod/connection_readiness.py
-      - name: Enforce Drive-free encrypted job lifecycle
+      - name: Enforce Drive-free encrypted single-render lifecycle
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -69,7 +69,7 @@ jobs:
               "'encrypted_job_artifact_persistence': True",
               "'plaintext_cleanup_required': True",
               "'secret_values_exposed': False",
-              "version='0.6.0'",
+              "version='0.7.0'",
               "'--candidate-id', job_id",
               'materialize_clone_runtime_from_s3.py',
               'clone_job_artifact_store.py',
@@ -77,6 +77,11 @@ jobs:
               'artifacts_persisted_encrypted=True',
               'BackgroundTask',
               'JOB_ID_RE',
+              'ACTIVE_JOB_LOCK',
+              'reserve_render_slot',
+              'release_render_slot(job_id)',
+              "status_code=429",
+              "'max_concurrent_render_jobs_per_worker': 1",
               'PASS_RENDER_PROVENANCE',
           ]
           missing = [token for token in required_api if token not in api]
@@ -109,7 +114,7 @@ jobs:
               if forbidden_dep in req:
                   raise SystemExit('Obsolete Google runtime dependency remains: ' + forbidden_dep)
 
-          print('Clone API is Drive-free, job-scoped, provenance-bound, encrypted at rest, and plaintext-cleaning')
+          print('Clone API is Drive-free, one-render-per-worker, provenance-bound, encrypted at rest, and plaintext-cleaning')
           PY
       - name: Assert no paid GPU or secret side effects in executable readiness code
         run: |
