@@ -9,8 +9,10 @@ on:
       - 'content/clone_quality_gate_v1.json'
       - 'content/clone_release_policy_v1.json'
       - 'content/render_face_guard_v1.json'
+      - 'content/identity_view_holdout_v1.json'
       - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
+      - 'worker/validate_identity_view_holdout.py'
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
@@ -23,8 +25,10 @@ on:
       - 'content/clone_quality_gate_v1.json'
       - 'content/clone_release_policy_v1.json'
       - 'content/render_face_guard_v1.json'
+      - 'content/identity_view_holdout_v1.json'
       - 'content/master_clone_package.json'
       - 'worker/validate_candidate_registry.py'
+      - 'worker/validate_identity_view_holdout.py'
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
@@ -45,6 +49,8 @@ jobs:
           python-version: '3.12'
       - name: Validate candidate registries
         run: python worker/validate_candidate_registry.py
+      - name: Validate multi-angle identity holdout
+        run: python worker/validate_identity_view_holdout.py
       - name: Validate clone policy invariants
         run: |
           python - <<'PY'
@@ -54,6 +60,7 @@ jobs:
           quality = json.loads(Path('content/clone_quality_gate_v1.json').read_text(encoding='utf-8'))
           release = json.loads(Path('content/clone_release_policy_v1.json').read_text(encoding='utf-8'))
           guard = json.loads(Path('content/render_face_guard_v1.json').read_text(encoding='utf-8'))
+          holdout = json.loads(Path('content/identity_view_holdout_v1.json').read_text(encoding='utf-8'))
           master = json.loads(Path('content/master_clone_package.json').read_text(encoding='utf-8'))
 
           assert quality.get('manual_approval_required') is True
@@ -62,6 +69,8 @@ jobs:
           assert release.get('auto_promote') is False
           assert float(release.get('identity_regression_tolerance', 1)) == 0.0
           assert set(release.get('identity_metrics') or []) == {'identity_similarity', 'identity_drift'}
+          assert holdout.get('required_views') == release.get('face_regression_policy', {}).get('required_views')
+          assert float((holdout.get('rules') or {}).get('identity_regression_tolerance', 1)) == 0.0
 
           identity_policy = guard.get('identity_policy') or {}
           assert identity_policy.get('canonical_reference_only_for_generation') is True
@@ -78,7 +87,7 @@ jobs:
           assert lifecycle.get('manual_promotion_required') is True
           assert lifecycle.get('holdout_regression_set') is True
 
-          print('Clone policy invariants OK: zero identity regression, immutable stable release, manual promotion only')
+          print('Clone policy invariants OK: zero identity regression, multi-angle holdout, immutable stable release, manual promotion only')
           PY
       - name: Enforce render policy at runtime
         run: |
@@ -160,6 +169,7 @@ jobs:
         run: |
           python -m py_compile \
             worker/validate_candidate_registry.py \
+            worker/validate_identity_view_holdout.py \
             worker/evaluate_clone_release.py \
             worker/compare_clone_challenger.py \
             worker/generate_scene_keyframes.py \
