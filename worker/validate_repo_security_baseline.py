@@ -7,6 +7,7 @@ biometric/media extensions. Performs no network calls and never prints secret va
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -31,7 +32,8 @@ def tracked_files() -> list[Path]:
 def main() -> int:
     failures: list[str] = []
     scanned = 0
-    for path in tracked_files():
+    tracked = tracked_files()
+    for path in tracked:
         rel = path.relative_to(ROOT).as_posix()
         if path.suffix.lower() in MEDIA_EXTS:
             failures.append(f'tracked_private_media:{rel}')
@@ -51,14 +53,17 @@ def main() -> int:
             if pattern.search(text):
                 failures.append(f'credential_signature:{name}:{rel}')
 
-    print({
-        'schema': 'zaskaleta-repo-security-baseline-v1',
+    report = {
+        'schema': 'zaskaleta-repo-security-baseline-v2',
         'passed': not failures,
+        'tracked_files_examined': len(tracked),
         'tracked_text_files_scanned': scanned,
+        'tracked_private_media_allowed': False,
         'secret_values_exposed': False,
         'network_action_performed': False,
-        'failures': failures,
-    })
+        'failures': sorted(failures),
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if not failures else 2
 
 
