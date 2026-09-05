@@ -37,6 +37,10 @@ def main() -> int:
         failures.append('versioning_not_required')
     if canonical.get('required_client_side_encryption_for_biometrics') is not True:
         failures.append('client_side_encryption_not_required')
+    if not isinstance(canonical.get('migration_manifest_key'), str) or not canonical.get('migration_manifest_key'):
+        failures.append('migration_manifest_key_missing')
+    if not isinstance(canonical.get('job_artifact_prefix'), str) or not canonical.get('job_artifact_prefix'):
+        failures.append('job_artifact_prefix_missing')
 
     encryption = cfg.get('encryption') or {}
     if encryption.get('client_side_encryption_required') is not True:
@@ -47,6 +51,10 @@ def main() -> int:
         failures.append('key_commit_protection_missing')
 
     runtime = cfg.get('runtime') or {}
+    if runtime.get('job_scoped_plaintext_materialization_required') is not True:
+        failures.append('job_scoped_materialization_not_required')
+    if runtime.get('runtime_attestation_required') is not True:
+        failures.append('runtime_attestation_not_required')
     if runtime.get('delete_temporary_plaintext_after_job') is not True:
         failures.append('plaintext_cleanup_not_required')
     if runtime.get('never_commit_private_biometric_media') is not True:
@@ -70,10 +78,13 @@ def main() -> int:
     configured = {k: bool(name and env_present(name)) for k, name in env_names.items()}
 
     report = {
-        'schema': 'zaskaleta-storage-runtime-readiness-v1',
+        'schema': 'zaskaleta-storage-runtime-readiness-v2',
         'policy_valid': not failures,
         'runtime_credentials_complete': all(configured.values()),
         'configured_fields': configured,
+        'job_scoped_plaintext_materialization_required': True,
+        'runtime_attestation_required': True,
+        'plaintext_cleanup_required': True,
         'secret_values_exposed': False,
         'network_action_performed': False,
         'google_drive_production_dependency': False,
