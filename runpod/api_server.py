@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 
@@ -24,10 +25,12 @@ PYTHON_BIN = os.environ.get('AI_TWIN_PYTHON', sys.executable)
 CORS_ORIGINS = [x.strip() for x in os.environ.get('AI_TWIN_CORS_ORIGINS', 'https://ai.zaskaleta.net').split(',') if x.strip()]
 STORAGE_CONFIG = APP_ROOT / 'content' / 'storage_config.json'
 JOB_ID_RE = re.compile(r'^[0-9a-f]{32}$')
+ACTIVE_JOB_LOCK = threading.Lock()
+ACTIVE_JOB_ID: str | None = None
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.6.0')
+app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.7.0')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -71,6 +74,27 @@ def auth(authorization: str | None):
     expected = f'Bearer {API_TOKEN}'
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail='Unauthorized')
+
+
+def reserve_render_slot(job_id: str) -> bool:
+    global ACTIVE_JOB_ID
+    with ACTIVE_JOB_LOCK:
+        if ACTIVE_JOB_ID is not None:
+            return False
+        ACTIVE_JOB_ID = job_id
+        return True
+
+
+def release_render_slot(job_id: str) -> None:
+    global ACTIVE_JOB_ID
+    with ACTIVE_JOB_LOCK:
+        if ACTIVE_JOB_ID == job_id:
+            ACTIVE_JOB_ID = None
+
+
+def active_job_snapshot() -> str | None:
+    with ACTIVE_JOB_LOCK:
+        return ACTIVE_JOB_ID
 
 
 def load_storage_contract() -> tuple[bool, dict]:
@@ -281,7 +305,8 @@ def run_job(job_id: str, req: RenderRequest):
             eligible_for_master=False, automatic_master_promotion=False, manual_review_required=not approved_for_next_gate,
             plaintext_runtime_cleaned=False, plaintext_job_artifacts_cleaned=False,
         )
-        runtime_cleaned = not runtime_assets.exists() or (shutil.rmtree(runtime_assets, ignore_errors=True) is None and not runtime_assets.exists())
+        shutil.rmtree(runtime_assets, ignore_errors=True)
+        runtime_cleaned = not runtime_assets.exists()
         job_plaintext_cleaned = cleanup_job_plaintext(job_dir, keep_state=True)
         write_state(job_id, plaintext_runtime_cleaned=runtime_cleaned, plaintext_job_artifacts_cleaned=job_plaintext_cleaned)
     except Exception as exc:
@@ -292,18 +317,21 @@ def run_job(job_id: str, req: RenderRequest):
             error_code=type(exc).__name__, error='Clone job failed before release eligibility.',
             plaintext_runtime_cleaned=True, plaintext_job_artifacts_cleaned=cleanup_ok,
         )
+    finally:
+        release_render_slot(job_id)
 
 
 @app.get('/health')
 def health():
     storage_contract_valid, _ = load_storage_contract(); configured = storage_env_status()
     return {
-        'ok': True, 'service': 'zaskaleta-ai-clone', 'version': '0.6.0',
+        'ok': True, 'service': 'zaskaleta-ai-clone', 'version': '0.7.0',
         'root_exists': APP_ROOT.exists(), 'storage_exists': STORAGE_ROOT.exists(),
         'storage_provider': 's3_compatible', 'storage_contract_valid': storage_contract_valid,
         'storage_credentials_complete': bool(configured) and all(configured.values()),
         'storage_runtime_ready': storage_runtime_ready(), 'job_scoped_plaintext_materialization': True,
         'encrypted_job_artifact_persistence': True, 'plaintext_cleanup_required': True,
+        'max_concurrent_render_jobs_per_worker': 1, 'worker_busy': active_job_snapshot() is not None,
         'google_drive_production_dependency': False, 'python': PYTHON_BIN, 'auth_configured': bool(API_TOKEN),
         'cors_origins': CORS_ORIGINS, 'gpu_expected': True, 'automatic_master_promotion': False,
         'secret_values_exposed': False,
@@ -317,8 +345,14 @@ def render(req: RenderRequest, background_tasks: BackgroundTasks, authorization:
     if req.voicePreset not in {'calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'}: raise HTTPException(status_code=400, detail='unsupported voicePreset')
     if not storage_runtime_ready(): raise HTTPException(status_code=503, detail='S3 storage contract, credentials, or runtime mount is not ready')
     job_id = uuid.uuid4().hex
-    write_state(job_id, status='queued', stage='queued', eligible_for_master=False, automatic_master_promotion=False, artifacts_persisted_encrypted=False, plaintext_runtime_cleaned=False, plaintext_job_artifacts_cleaned=False, request={'profile': req.profile.model_dump(), 'seconds': req.seconds, 'voicePreset': req.voicePreset, 'scene': req.scene})
-    background_tasks.add_task(run_job, job_id, req)
+    if not reserve_render_slot(job_id):
+        raise HTTPException(status_code=429, detail='GPU worker is busy; retry after the active render finishes')
+    try:
+        write_state(job_id, status='queued', stage='queued', eligible_for_master=False, automatic_master_promotion=False, artifacts_persisted_encrypted=False, plaintext_runtime_cleaned=False, plaintext_job_artifacts_cleaned=False, request={'profile': req.profile.model_dump(), 'seconds': req.seconds, 'voicePreset': req.voicePreset, 'scene': req.scene})
+        background_tasks.add_task(run_job, job_id, req)
+    except Exception:
+        release_render_slot(job_id)
+        raise
     return {'job_id': job_id, 'status': 'queued', 'eligible_for_master': False}
 
 
