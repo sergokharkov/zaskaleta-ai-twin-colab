@@ -3,16 +3,26 @@
 service-account*.json
 google-service-account*.json
 credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx
 .env
 .env.*
 !.env.example
 
-# Runtime outputs
+# Runtime outputs / attestations
 __pycache__/
 *.pyc
 *.pyo
 *.log
 .DS_Store
+.clone_runtime_attestation.json
+_runtime_assets/
+CLONE_V2_*.mp4
+CLONE_V2_*.wav
+CLONE_V2_*.png
+CLONE_V2_*PROVENANCE*.json
 
 # Local model/cache/runtime directories
 .cache/
@@ -20,3 +30,4 @@ models/
 outputs/
 api_jobs/
 MASTER_CLONE/
+MASTER_CLONE_ENCRYPTED/
