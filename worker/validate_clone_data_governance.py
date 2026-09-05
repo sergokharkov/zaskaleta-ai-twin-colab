@@ -17,6 +17,7 @@ def main() -> int:
     storage = load('storage_config.json')
     migration = load('storage_migration_policy_v1.json')
     memory = load('clone_memory_policy_v1.json')
+    checkpoint = load('clone_memory_checkpoint_policy_v1.json')
     restore = load('storage_restore_policy_v1.json')
     retention = load('storage_retention_policy_v1.json')
     cutover = load('storage_cutover_policy_v1.json')
@@ -47,6 +48,19 @@ def main() -> int:
     if 'failure_memory' not in (memory.get('domains') or []):
         failures.append('failure_memory_missing')
 
+    if checkpoint.get('schema') != 'zaskaleta-clone-memory-checkpoint-policy-v1':
+        failures.append('checkpoint_policy_schema_invalid')
+    if checkpoint.get('automatic_trust_promotion') is not False:
+        failures.append('checkpoint_automatic_trust_forbidden')
+    if checkpoint.get('manual_checkpoint_approval_required') is not True:
+        failures.append('checkpoint_manual_approval_not_required')
+    cp_rules = checkpoint.get('rules') or {}
+    for key in ('storage_version_id_required', 'immutable_retention_confirmed_required',
+                'independent_backup_confirmed_required', 'manual_approval_must_be_true',
+                'checkpoint_overwrite_forbidden', 'full_chain_rewrite_requires_checkpoint_mismatch_failure'):
+        if cp_rules.get(key) is not True:
+            failures.append('checkpoint_rule_weakened:' + key)
+
     rrules = restore.get('rules') or {}
     for key in ('restore_test_required', 'restore_to_isolated_staging_first',
                 'decrypted_sha256_must_match_original', 'production_overwrite_forbidden',
@@ -67,10 +81,21 @@ def main() -> int:
     crules = cutover.get('rules') or {}
     for key in ('manual_cutover_required', 'automatic_cutover_forbidden', 'all_objects_must_be_verified',
                 'source_and_decrypted_destination_sha256_must_match', 'restore_test_must_pass',
-                'backup_copy_must_be_verified', 'source_deletion_forbidden_during_cutover',
-                'rollback_plan_required'):
+                'backup_copy_must_be_verified', 'trusted_clone_memory_checkpoint_must_be_verified',
+                'checkpoint_storage_version_must_be_verified', 'checkpoint_immutable_retention_must_be_verified',
+                'checkpoint_independent_backup_must_be_verified', 'checkpoint_manual_approval_must_be_verified',
+                'source_deletion_forbidden_during_cutover', 'rollback_plan_required'):
         if crules.get(key) is not True:
             failures.append('cutover_rule_weakened:' + key)
+
+    required_cutover = set(cutover.get('required_evidence') or [])
+    if 'memory_checkpoint_verification' not in required_cutover:
+        failures.append('cutover_memory_checkpoint_evidence_missing')
+    required_checkpoint = set(cutover.get('memory_checkpoint_verification_required_fields') or [])
+    for key in ('checkpoint_evaluation_sha256', 'checkpoint_validation_passed', 'storage_version_verified',
+                'immutable_retention_verified', 'independent_backup_verified', 'manual_approval_verified'):
+        if key not in required_checkpoint:
+            failures.append('cutover_checkpoint_field_missing:' + key)
 
     report = {
         'schema': 'zaskaleta-clone-data-governance-evaluation-v1',
@@ -79,6 +104,7 @@ def main() -> int:
         'automatic_cutover_allowed': False,
         'automatic_self_training_allowed': False,
         'automatic_biometric_deletion_allowed': False,
+        'trusted_memory_checkpoint_required_for_cutover': True,
         'failures': failures,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
