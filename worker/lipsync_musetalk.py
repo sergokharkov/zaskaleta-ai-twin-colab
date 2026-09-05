@@ -46,6 +46,20 @@ def copy_local(src: pathlib.Path, dst_dir: pathlib.Path, stem: str):
     return dst
 
 
+def runtime_temp_parent() -> pathlib.Path:
+    explicit = os.environ.get('ZASKALETA_TMP_ROOT', '').strip()
+    if explicit:
+        parent = pathlib.Path(explicit).resolve()
+    elif os.environ.get('KAGGLE_KERNEL_RUN_TYPE') or pathlib.Path('/kaggle/working').is_dir():
+        parent = pathlib.Path('/kaggle/working/zaskaleta_tmp').resolve()
+    elif pathlib.Path('/content').is_dir():
+        parent = pathlib.Path('/content').resolve()
+    else:
+        parent = pathlib.Path(tempfile.gettempdir()).resolve()
+    parent.mkdir(parents=True, exist_ok=True)
+    return parent
+
+
 def run_inference(root, model_dir, config, attempt_results, batch_size):
     cmd = [
         sys.executable, '-m', 'scripts.inference',
@@ -115,9 +129,21 @@ def main():
         media_candidates.append(('explicit-keyframe-fallback', photo))
 
     model_dir = root / 'models' / 'musetalkV15'
-    failures = []
+    required_models = [
+        model_dir / 'unet.pth',
+        model_dir / 'musetalk.json',
+        root / 'models' / 'whisper' / 'config.json',
+        root / 'models' / 'whisper' / 'pytorch_model.bin',
+        root / 'models' / 'whisper' / 'preprocessor_config.json',
+    ]
+    missing_models = [str(p) for p in required_models if not p.is_file() or p.stat().st_size <= 0]
+    if missing_models:
+        raise FileNotFoundError('Required MuseTalk 1.5 model files are missing: ' + ', '.join(missing_models))
 
-    with tempfile.TemporaryDirectory(prefix='zaskaleta_musetalk_', dir='/content') as tmp_name:
+    failures = []
+    temp_parent = runtime_temp_parent()
+
+    with tempfile.TemporaryDirectory(prefix='zaskaleta_musetalk_', dir=str(temp_parent)) as tmp_name:
         tmp = pathlib.Path(tmp_name)
         local_audio = copy_local(audio, tmp, 'audio')
 
