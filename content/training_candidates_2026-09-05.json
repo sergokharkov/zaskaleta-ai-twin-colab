@@ -1,0 +1,74 @@
+{
+  "schema": "zaskaleta-training-candidates-v1",
+  "created_at": "2026-09-05",
+  "policy": {
+    "auto_approve": false,
+    "manual_review_required": true,
+    "approved_only_may_affect_master_clone": true,
+    "identity_from_generated_or_uncertain_sources": false
+  },
+  "candidates": [
+    {
+      "filename": "53693.mp4",
+      "duration_seconds": 17.851,
+      "video": {"width": 1080, "height": 1920, "fps_approx": 20.167},
+      "audio": {"sample_rate": 44100, "channels": 2},
+      "recommended_roles": ["motion", "talking"],
+      "use_for": ["head turns", "gaze changes", "upper-body posture", "expression timing"],
+      "avoid_for": ["identity anchor"],
+      "review_notes": "Strong frontal/3-4 body visibility and useful expression changes. Visible baked captions/watermark and stylized cinematic processing; source authenticity must be confirmed before any identity use.",
+      "status": "candidate"
+    },
+    {
+      "filename": "50380.mp4",
+      "duration_seconds": 42.567,
+      "video": {"width": 1280, "height": 2276, "fps_approx": 30.0},
+      "audio": {"sample_rate": 44100, "channels": 2},
+      "recommended_roles": ["talking", "facial_expression_candidate"],
+      "use_for": ["mouth/jaw timing review", "facial expression range", "micro head motion"],
+      "avoid_for": ["clean identity training", "background learning"],
+      "review_notes": "Face is large and useful, but the clip contains heavy editing, overlays and visual effects. Extract only clean stable segments after manual review.",
+      "status": "candidate"
+    },
+    {
+      "filename": "50280.mp4",
+      "duration_seconds": 22.268,
+      "video": {"width": 1080, "height": 1920, "fps_approx": 30.0},
+      "audio": {"sample_rate": 44100, "channels": 2},
+      "recommended_roles": ["identity_candidate", "motion"],
+      "use_for": ["natural selfie angles", "real-world lighting", "head motion", "natural facial appearance"],
+      "avoid_for": ["full-body motion"],
+      "review_notes": "Most valuable natural-looking personal footage in this batch. Contains camera movement and other people/scene elements, so extract only frames/segments where the primary subject is clear.",
+      "status": "candidate"
+    },
+    {
+      "filename": "48025.mp4",
+      "duration_seconds": 22.477,
+      "video": {"width": 1080, "height": 1920, "fps_approx": 29.97},
+      "audio": {"sample_rate": 44100, "channels": 2},
+      "recommended_roles": ["motion", "identity_candidate"],
+      "use_for": ["driving posture", "sitting posture", "outdoor full/partial-body motion", "water/pool movement"],
+      "avoid_for": ["single continuous behavior reference"],
+      "review_notes": "Montage contains several distinct scenes. Useful only after segmentation into scene-specific clips so unrelated motion contexts do not get mixed into one preset.",
+      "status": "candidate"
+    },
+    {
+      "filename": "43229.mp4",
+      "duration_seconds": 45.647,
+      "video": {"width": 1080, "height": 1920, "fps_approx": 120.0},
+      "audio": {"sample_rate": 44100, "channels": 2},
+      "recommended_roles": ["low_priority_motion_candidate"],
+      "use_for": ["limited in-car head motion if isolated"],
+      "avoid_for": ["identity training", "talking training", "general motion training"],
+      "review_notes": "Primary subject is visible only briefly; much of the clip shows vehicle interior/road and other people. Keep low priority unless a short useful segment is isolated.",
+      "status": "candidate"
+    }
+  ],
+  "next_pipeline": [
+    "segment useful intervals",
+    "run motion extraction on motion candidates",
+    "run face/quality checks on identity candidates",
+    "manual APPROVE or REJECT",
+    "only APPROVED assets may enter next MASTER_CLONE version"
+  ]
+}
