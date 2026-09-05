@@ -74,6 +74,8 @@ def install_core(uv: str) -> None:
         "diffusers==0.30.2", "transformers==4.39.2", "huggingface_hub==0.30.2",
         "mmengine==0.10.7", "scipy==1.10.1", "soundfile==0.12.1",
         "librosa==0.10.1", "einops==0.7.0", "omegaconf==2.3.0", "tqdm==4.66.5",
+        "accelerate==0.28.0", "gdown", "requests", "imageio[ffmpeg]",
+        "ffmpeg-python", "moviepy",
         "pip==24.0", "setuptools==68.2.2", "wheel",
     ])
     run([
