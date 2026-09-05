@@ -46,37 +46,69 @@ jobs:
           assert p['rules']['automatic_source_deletion_forbidden'] is True
           assert p['rules']['automatic_google_drive_cutover_forbidden'] is True
           assert p['rules']['encryption_key_must_not_be_written_to_manifest'] is True
+          assert p['rules']['source_and_destination_sha256_must_match_after_decryption'] is True
           assert s['canonical_storage']['provider'] == 's3_compatible'
           assert s['canonical_storage']['required_region_policy'] == 'EU_ONLY'
           assert s['encryption']['client_side_encryption_required'] is True
           print('Storage migration policy invariants OK')
           PY
-      - name: Enforce safe defaults and no cutover side effects
+      - name: Enforce strict cryptographic migration contract
         run: |
           python - <<'PY'
           from pathlib import Path
           text = Path('worker/migrate_clone_storage.py').read_text(encoding='utf-8')
           required = [
               '--execute',
+              'parse_aes256_key',
+              'validate=True',
+              'exactly 32 bytes',
+              'AES-256-GCM',
+              'VERIFIED_DECRYPTED_SHA256',
+              'verify_downloaded_ciphertext',
+              'download_file(',
+              'verified_decrypted_sha256',
+              'verified_decrypted_size_bytes',
+              'destination_verified_after_decryption',
+              'plaintext_temp_files_created',
               'cutover_performed',
               'source_deleted',
               'manual_cutover_required',
-              'AES-256-GCM',
-              'source_sha256',
-              'verify_status',
               'secret_values_exposed',
           ]
           missing = [x for x in required if x not in text]
           if missing:
               raise SystemExit('Migration safeguards missing: ' + ', '.join(missing))
+
           forbidden = [
+              'hashlib.sha256(raw.encode',
+              'VERIFIED_METADATA_SHA256',
               'delete_object(',
               'shutil.rmtree(',
-              'unlink()',
               "update_file('content/storage_config.json'",
+              'print(os.environ',
           ]
           hits = [x for x in forbidden if x in text]
           if hits:
-              raise SystemExit('Unsafe migration side effect detected: ' + ', '.join(hits))
-          print('Migration script is dry-run by default and cannot delete source or auto-cutover')
+              raise SystemExit('Unsafe migration behavior detected: ' + ', '.join(hits))
+          print('Migration requires a real 256-bit key and verifies downloaded ciphertext after decryption')
+          PY
+      - name: Dry-run smoke test without secrets or network
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/source/IDENTITY"
+          printf 'synthetic-ci-only' > "$tmp/source/IDENTITY/test.txt"
+          python worker/migrate_clone_storage.py --source-root "$tmp/source" --manifest-out "$tmp/manifest.json"
+          python - "$tmp/manifest.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          m = json.loads(Path(sys.argv[1]).read_text())
+          assert m['mode'] == 'DRY_RUN'
+          assert m['migration_complete'] is False
+          assert m['source_deleted'] is False
+          assert m['cutover_performed'] is False
+          assert m['secret_values_exposed'] is False
+          assert m['plaintext_temp_files_created'] is False
+          assert m['object_count'] == 1
+          assert m['objects'][0]['verify_status'] == 'NOT_RUN'
+          print('Dry-run is non-destructive and network-free')
           PY
