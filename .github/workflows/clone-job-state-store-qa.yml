@@ -1,0 +1,49 @@
+name: Clone Job State Store QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/clone_job_state_store.py'
+      - 'runpod/api_server.py'
+      - 'content/storage_config.json'
+      - '.github/workflows/clone-job-state-store-qa.yml'
+  pull_request:
+    paths:
+      - 'worker/clone_job_state_store.py'
+      - 'runpod/api_server.py'
+      - 'content/storage_config.json'
+      - '.github/workflows/clone-job-state-store-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  state-recovery-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile worker/clone_job_state_store.py runpod/api_server.py
+      - name: Enforce encrypted recoverable state contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          store = Path('worker/clone_job_state_store.py').read_text(encoding='utf-8')
+          api = Path('runpod/api_server.py').read_text(encoding='utf-8')
+          for token in ['AES-256-GCM','VERIFIED_DECRYPTED_SHA256','zaskaleta-clone-job-state-manifest-v1','strict_key',"sub.add_parser('persist')", "sub.add_parser('restore')",'secret_values_exposed']:
+              if token not in store:
+                  raise SystemExit('Encrypted state contract missing: ' + token)
+          for token in ['persist_job_state','restore_job_state','encrypted_job_state_recovery','clone_job_state_store.py']:
+              if token not in api:
+                  raise SystemExit('API job state recovery missing: ' + token)
+          forbidden = ['print(os.environ)','print(values)','print(key)','google-api-python-client','AI_TWIN_DRIVE_SYNC']
+          hits = [x for x in forbidden if x in store + '\n' + api]
+          if hits:
+              raise SystemExit('Unsafe state recovery behavior found: ' + ', '.join(hits))
+          print('Clone job state is encrypted, verified, recoverable and secret-safe')
+          PY
