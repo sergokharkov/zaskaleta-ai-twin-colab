@@ -1,0 +1,24 @@
+{
+  "schema": "zaskaleta-storage-retention-policy-v1",
+  "rules": {
+    "stable_releases_never_auto_delete": true,
+    "approved_identity_assets_never_auto_delete": true,
+    "master_voice_never_auto_delete": true,
+    "canonical_identity_never_auto_delete": true,
+    "rejected_items_never_become_training_data": true,
+    "deletion_requires_manifested_reason": true,
+    "automatic_deletion_of_biometric_source_assets_forbidden": true,
+    "retention_changes_require_manual_review": true
+  },
+  "classes": {
+    "CANDIDATES": {"default_days": 90, "auto_delete": false, "review_before_delete": true},
+    "REJECTED": {"default_days": 180, "auto_delete": false, "retain_metadata_after_payload_removal": true},
+    "TESTS": {"default_days": 60, "auto_delete": false, "retain_evaluation_and_hashes": true},
+    "EVALUATIONS": {"default_days": null, "auto_delete": false},
+    "APPROVED": {"default_days": null, "auto_delete": false},
+    "VERSIONS": {"default_days": null, "auto_delete": false},
+    "RELEASES": {"default_days": null, "auto_delete": false},
+    "FINAL": {"default_days": null, "auto_delete": false},
+    "MEMORY": {"default_days": null, "auto_delete": false, "append_only": true}
+  }
+}
