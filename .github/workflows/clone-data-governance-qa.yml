@@ -1,0 +1,95 @@
+name: Clone Data Governance QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/clone_memory_policy_v1.json'
+      - 'content/storage_restore_policy_v1.json'
+      - 'content/storage_retention_policy_v1.json'
+      - 'content/storage_cutover_policy_v1.json'
+      - 'content/storage_migration_policy_v1.json'
+      - 'content/storage_config.json'
+      - 'worker/validate_clone_memory_event.py'
+      - 'worker/validate_storage_migration_manifest.py'
+      - 'worker/validate_storage_restore.py'
+      - 'worker/validate_storage_cutover.py'
+      - 'worker/validate_clone_data_governance.py'
+      - '.github/workflows/clone-data-governance-qa.yml'
+  pull_request:
+    paths:
+      - 'content/clone_memory_policy_v1.json'
+      - 'content/storage_restore_policy_v1.json'
+      - 'content/storage_retention_policy_v1.json'
+      - 'content/storage_cutover_policy_v1.json'
+      - 'content/storage_migration_policy_v1.json'
+      - 'content/storage_config.json'
+      - 'worker/validate_clone_memory_event.py'
+      - 'worker/validate_storage_migration_manifest.py'
+      - 'worker/validate_storage_restore.py'
+      - 'worker/validate_storage_cutover.py'
+      - 'worker/validate_clone_data_governance.py'
+      - '.github/workflows/clone-data-governance-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate data governance policy graph
+        run: python worker/validate_clone_data_governance.py
+      - name: Python syntax sanity
+        run: |
+          python -m py_compile \
+            worker/validate_clone_memory_event.py \
+            worker/validate_storage_migration_manifest.py \
+            worker/validate_storage_restore.py \
+            worker/validate_storage_cutover.py \
+            worker/validate_clone_data_governance.py
+      - name: Assert fail-closed contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          checks = {
+            'worker/validate_clone_memory_event.py': [
+              'automatic_self_training_forbidden', 'approved_memory_requires_manual_approval',
+              'raw_biometric_payload_forbidden', 'rejected_memory_cannot_train'
+            ],
+            'worker/validate_storage_migration_manifest.py': [
+              'BLOCK_MIGRATION', 'object_', 'secret_field_forbidden', 'PASS_TO_RESTORE_TEST'
+            ],
+            'worker/validate_storage_restore.py': [
+              'production_overwrite_forbidden', 'decrypted_hash_verification_failed', 'BLOCK_RESTORE'
+            ],
+            'worker/validate_storage_cutover.py': [
+              'automatic_cutover_forbidden', 'source_deletion_forbidden_during_cutover',
+              'backup_not_independently_verified', 'BLOCK_CUTOVER'
+            ],
+          }
+          for path, tokens in checks.items():
+              text = Path(path).read_text(encoding='utf-8')
+              missing = [t for t in tokens if t not in text]
+              if missing:
+                  raise SystemExit(f'{path} missing safeguards: {missing}')
+          print('Clone data governance validators are fail-closed')
+          PY
+      - name: Reject secret or raw biometric payload patterns in policies
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path('content').glob('*policy_v1.json'):
+              text = path.read_text(encoding='utf-8')
+              json.loads(text)
+              for bad in ('BEGIN PRIVATE KEY', 'aws_secret_access_key=', 'AI_TWIN_DATA_ENCRYPTION_KEY='):
+                  if bad in text:
+                      raise SystemExit(f'Secret material detected in {path}: {bad}')
+          print('No secret material embedded in clone data governance policies')
+          PY
