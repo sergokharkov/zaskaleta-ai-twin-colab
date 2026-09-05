@@ -15,6 +15,11 @@ on:
       - 'worker/validate_clone_promotion_bundle.py'
       - 'worker/validate_clone_duration_progression.py'
       - 'worker/validate_clone_v2_temporal_output.py'
+      - 'worker/storage_backend.py'
+      - 'worker/validate_storage_cutover.py'
+      - 'worker/validate_storage_restore.py'
+      - 'worker/validate_clone_data_governance.py'
+      - 'worker/verify_clone_memory_chain.py'
       - 'content/clone_reference_profile.json'
       - 'content/talking_profile_v2.json'
       - 'content/clone_quality_gate_v1.json'
@@ -24,7 +29,9 @@ on:
       - 'content/identity_view_holdout_v1.json'
       - 'content/clone_promotion_bundle_policy_v1.json'
       - 'content/clone_duration_gate_policy_v1.json'
+      - 'content/clone_memory_policy_v1.json'
       - 'content/storage_config.json'
+      - 'content/storage_migration_policy_v1.json'
       - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
   pull_request:
     paths:
@@ -47,26 +54,55 @@ jobs:
         with:
           python-version: '3.12'
       - name: Syntax sanity
-        run: python -m py_compile runpod/clone_v2_readiness.py
+        run: |
+          python -m py_compile \
+            runpod/clone_v2_readiness.py \
+            runpod/preflight.py \
+            worker/storage_backend.py
       - name: Verify Clone v2 static RunPod readiness
         run: python runpod/clone_v2_readiness.py
-      - name: Assert no paid GPU side effects
+      - name: Validate S3 storage policy without secrets or network calls
+        run: python worker/storage_backend.py
+      - name: Assert no paid GPU or secret side effects
         run: |
           python - <<'PY'
           from pathlib import Path
-          source = Path('runpod/clone_v2_readiness.py').read_text(encoding='utf-8')
+
+          files = [
+              Path('runpod/clone_v2_readiness.py'),
+              Path('runpod/preflight.py'),
+          ]
+          joined = '\n'.join(p.read_text(encoding='utf-8') for p in files)
+
           required = [
               'paid_gpu_started',
               'manual_budget_approval_required_before_gpu_start',
-              'ready_for_paid_gpu_consideration',
               'first_test_gate_seconds',
+              'google_drive_production_dependency',
+              'secret_values_exposed',
+              'storage_contract',
+              'storage_backend_policy',
           ]
-          missing = [token for token in required if token not in source]
+          missing = [token for token in required if token not in joined]
           if missing:
-              raise SystemExit('RunPod readiness safety contract missing: ' + ', '.join(missing))
-          forbidden = ['runpodctl create', 'runpodctl pod create', 'flash deploy', 'requests.post(']
-          hits = [token for token in forbidden if token in source]
+              raise SystemExit('RunPod readiness/preflight safety contract missing: ' + ', '.join(missing))
+
+          forbidden = [
+              'runpodctl create',
+              'runpodctl pod create',
+              'flash deploy',
+              'requests.post(',
+              'boto3.client(',
+              'create_pod(',
+              'create_endpoint(',
+              'print(TOKEN)',
+              'print(os.environ)',
+              'GOOGLE_APPLICATION_CREDENTIALS',
+              'AI_TWIN_DRIVE_SYNC',
+          ]
+          hits = [token for token in forbidden if token in joined]
           if hits:
-              raise SystemExit('Paid/provisioning side effect found in static readiness validator: ' + ', '.join(hits))
-          print('Static readiness validator cannot provision paid GPU resources')
+              raise SystemExit('Forbidden provisioning/secret/legacy-drive behavior found: ' + ', '.join(hits))
+
+          print('RunPod readiness/preflight cannot provision paid GPU, expose secrets, or depend on Google Drive')
           PY
