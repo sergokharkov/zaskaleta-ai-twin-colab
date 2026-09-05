@@ -1,10 +1,28 @@
 import argparse
 import json
+import math
 from pathlib import Path
 
 
 def fail(message: str):
     raise SystemExit(message)
+
+
+def require_bool(row: dict, field: str, view: str) -> bool:
+    value = row.get(field)
+    if type(value) is not bool:
+        fail(f'{view}: {field} must be a JSON boolean, got {type(value).__name__}')
+    return value
+
+
+def require_number(row: dict, field: str, view: str) -> float:
+    value = row.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        fail(f'{view}: {field} must be a JSON number, got {type(value).__name__}')
+    value = float(value)
+    if not math.isfinite(value):
+        fail(f'{view}: {field} must be finite')
+    return value
 
 
 def main():
@@ -48,22 +66,25 @@ def main():
             evaluated[view] = {'decision': 'FAIL', 'blockers': ['missing_review_fields']}
             continue
 
-        if row.get('reference') != reference:
-            blockers.append(f'{view}: result reference mismatch')
-
-        identity_similarity = float(row['identity_similarity'])
-        identity_drift = float(row['identity_drift'])
-        face_structure_drift = bool(row['face_structure_drift'])
-        age_regression = bool(row['age_regression'])
-        beard_regression = bool(row['beard_regression'])
-        hairline_regression = bool(row['hairline_regression'])
-        jaw_regression = bool(row['jaw_regression'])
-        mouth_regression = bool(row['mouth_regression'])
-        asymmetry_loss = bool(row['asymmetry_loss'])
+        identity_similarity = require_number(row, 'identity_similarity', view)
+        identity_drift = require_number(row, 'identity_drift', view)
+        face_structure_drift = require_bool(row, 'face_structure_drift', view)
+        age_regression = require_bool(row, 'age_regression', view)
+        beard_regression = require_bool(row, 'beard_regression', view)
+        hairline_regression = require_bool(row, 'hairline_regression', view)
+        jaw_regression = require_bool(row, 'jaw_regression', view)
+        mouth_regression = require_bool(row, 'mouth_regression', view)
+        asymmetry_loss = require_bool(row, 'asymmetry_loss', view)
         declared_decision = row.get('decision')
 
         view_blockers = []
-        if identity_drift > 0.0:
+        if row.get('reference') != reference:
+            view_blockers.append('reference_mismatch')
+        if not 0.0 <= identity_similarity <= 1.0:
+            view_blockers.append('identity_similarity_out_of_range')
+        if identity_drift < 0.0:
+            view_blockers.append('identity_drift_invalid_negative')
+        elif identity_drift > 0.0:
             view_blockers.append('identity_drift_above_zero')
         if face_structure_drift:
             view_blockers.append('face_structure_drift')
@@ -100,12 +121,14 @@ def main():
         'results': results_path.name,
         'required_views': required_views,
         'views': evaluated,
+        'strict_json_types_enforced': True,
+        'finite_numeric_metrics_required': True,
         'zero_identity_regression_enforced': True,
         'manual_override_allowed': False,
         'eligible_for_manual_promotion_review': eligible,
         'decision': 'PASS_TO_MANUAL_PROMOTION_REVIEW' if eligible else 'BLOCK_PROMOTION',
         'blockers': blockers,
-        'note': 'This evaluator never auto-promotes MASTER CLONE. Any identity regression in any required angle blocks promotion.'
+        'note': 'This evaluator never auto-promotes MASTER CLONE. Any identity regression, malformed metric type, non-finite metric, or reference mismatch in any required angle blocks promotion.'
     }
 
     out_path = Path(args.output) if args.output else results_path.with_name(results_path.stem + '.evaluation.json')
