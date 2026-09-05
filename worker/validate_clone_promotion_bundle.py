@@ -52,6 +52,12 @@ def main():
     if float(policy.get('identity_regression_tolerance', 1)) != 0.0:
         blockers.append('identity_regression_tolerance_not_zero')
 
+    rules = policy.get('rules') or {}
+    if rules.get('candidate_id_required_on_all_artifacts') is not True:
+        blockers.append('policy_candidate_id_not_required')
+    if rules.get('candidate_id_must_match_across_all_artifacts') is not True:
+        blockers.append('policy_candidate_id_match_not_required')
+
     required = policy.get('required_artifacts') or {}
     clone_eval = docs['clone_evaluation']
     identity_eval = docs['identity_view_evaluation']
@@ -109,16 +115,28 @@ def main():
     if render_provenance.get('passed') is not True:
         blockers.append('render_provenance_failed')
 
-    candidate_ids = []
-    for doc in (clone_eval, identity_eval, challenger, temporal, render_provenance):
-        candidate_id = doc.get('candidate_id')
-        if isinstance(candidate_id, str) and candidate_id.strip():
-            candidate_ids.append(candidate_id.strip())
-    if candidate_ids and len(set(candidate_ids)) != 1:
+    artifact_docs = {
+        'clone_evaluation': clone_eval,
+        'identity_view_evaluation': identity_eval,
+        'challenger_comparison': challenger,
+        'temporal_face_guard': temporal,
+        'render_provenance': render_provenance,
+    }
+    candidate_ids = {}
+    for name, doc in artifact_docs.items():
+        raw = doc.get('candidate_id')
+        if not isinstance(raw, str) or not raw.strip():
+            blockers.append(f'candidate_id_missing:{name}')
+            continue
+        candidate_ids[name] = raw.strip()
+
+    unique_candidate_ids = set(candidate_ids.values())
+    if len(candidate_ids) == len(artifact_docs) and len(unique_candidate_ids) != 1:
         blockers.append('candidate_id_mismatch_across_artifacts')
 
     hashes = {name: sha256_file(path) for name, path in paths.items()}
     ready = not blockers
+    resolved_candidate_id = next(iter(unique_candidate_ids)) if len(unique_candidate_ids) == 1 and len(candidate_ids) == len(artifact_docs) else None
     report = {
         'schema': 'zaskaleta-clone-promotion-bundle-evaluation-v1',
         'decision': policy['eligible_decision'] if ready else policy['blocked_decision'],
@@ -129,10 +147,11 @@ def main():
         'rollback_required': True,
         'zero_identity_regression_enforced': True,
         'render_provenance_required': True,
-        'candidate_id': candidate_ids[0] if candidate_ids and len(set(candidate_ids)) == 1 else None,
+        'candidate_id_required_on_all_artifacts': True,
+        'candidate_id': resolved_candidate_id,
         'blockers': blockers,
         'artifact_sha256': hashes,
-        'note': 'This validator never promotes MASTER CLONE. It only verifies that all mandatory evidence, including render provenance, is present and consistent before human review.'
+        'note': 'This validator never promotes MASTER CLONE. It only verifies that all mandatory evidence, including render provenance and one shared candidate_id across every artifact, is present and consistent before human review.'
     }
 
     out = Path(args.output)
