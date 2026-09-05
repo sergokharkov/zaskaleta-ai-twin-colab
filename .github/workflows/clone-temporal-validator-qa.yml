@@ -1,0 +1,68 @@
+name: Clone Temporal Validator QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/talking_temporal_guard_v1.json'
+      - 'worker/validate_clone_v2_temporal_output.py'
+      - '.github/workflows/clone-temporal-validator-qa.yml'
+  pull_request:
+    paths:
+      - 'content/talking_temporal_guard_v1.json'
+      - 'worker/validate_clone_v2_temporal_output.py'
+      - '.github/workflows/clone-temporal-validator-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-validator-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate temporal policy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = json.loads(Path('content/talking_temporal_guard_v1.json').read_text(encoding='utf-8'))
+          assert p['schema'] == 'zaskaleta-clone-v2-talking-temporal-guard-v1'
+          assert int(p['sample_count']) >= 7
+          assert 0.85 <= float(p['minimum_pass_ratio']) <= 1.0
+          assert int(p['max_face_count']) == 1
+          assert float(p['minimum_face_area_ratio']) > 0
+          assert float(p['maximum_face_area_ratio']) > float(p['minimum_face_area_ratio'])
+          assert float(p['maximum_normalized_center_jump']) <= 0.30
+          assert float(p['maximum_adjacent_area_ratio_multiplier']) <= 2.20
+          identity = p.get('identity_policy') or {}
+          assert float(identity.get('identity_regression_tolerance', 1)) == 0.0
+          assert identity.get('manual_identity_review_required') is True
+          assert identity.get('stable_vs_challenger_identity_gate_required') is True
+          print('Temporal policy invariants OK')
+          PY
+      - name: Python syntax sanity
+        run: python -m py_compile worker/validate_clone_v2_temporal_output.py
+      - name: Validate required hard-stop tokens
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('worker/validate_clone_v2_temporal_output.py').read_text(encoding='utf-8')
+          required = [
+              'no_face_detected',
+              'multiple_faces_detected',
+              'face_center_jump_exceeded',
+              'face_scale_jump_exceeded',
+              'temporal_geometry_instability',
+              'Structural temporal validation only',
+          ]
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('Missing validator safeguards: ' + ', '.join(missing))
+          print('Temporal validator safeguards present')
+          PY
