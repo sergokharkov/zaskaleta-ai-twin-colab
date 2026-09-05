@@ -1,0 +1,51 @@
+name: Clone Security Baseline QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.gitignore'
+      - 'runpod/**'
+      - 'worker/**'
+      - 'content/**'
+      - '.github/workflows/clone-security-baseline-qa.yml'
+  pull_request:
+    paths:
+      - '.gitignore'
+      - 'runpod/**'
+      - 'worker/**'
+      - 'content/**'
+      - '.github/workflows/clone-security-baseline-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  security-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile security validator
+        run: python -m py_compile worker/validate_repo_security_baseline.py
+      - name: Scan tracked repository for credential signatures and private media
+        run: python worker/validate_repo_security_baseline.py
+      - name: Enforce runtime ignore coverage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.gitignore').read_text(encoding='utf-8')
+          required = [
+              '.env', '*.pem', '*.key', '_runtime_assets/', '.clone_runtime_attestation.json',
+              'MASTER_CLONE/', 'MASTER_CLONE_ENCRYPTED/', 'api_jobs/', 'CLONE_V2_*.mp4',
+          ]
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('Required clone safety ignore missing: ' + ', '.join(missing))
+          print('Runtime biometric outputs and credential files are excluded from Git tracking')
+          PY
