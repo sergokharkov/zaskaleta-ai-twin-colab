@@ -26,6 +26,7 @@ DEFAULT_ATTEMPTS = 3
 MIN_FACE_AREA_RATIO = 0.012
 MAX_FACE_AREA_RATIO = 0.32
 MIN_FACE_SHARPNESS = 18.0
+MAX_FACE_COUNT = 1
 
 # Colab/mobile connections can briefly interrupt large Hugging Face downloads.
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "240")
@@ -159,17 +160,26 @@ def render_one(pipe, prompt, ref, seed, steps, width, height):
 
 
 def inspect_visible_face(image: Image.Image):
-    """Cheap render-time guard: require one detectable, usable face before a keyframe may be saved.
+    """Reject missing, duplicate, badly sized or soft faces before a keyframe can be saved.
 
     This is deliberately not an identity classifier. Identity promotion is still controlled by the
     downstream stable-vs-challenger quality gate. Here we prevent obviously unusable render outputs
-    (missing/tiny/soft face) from becoming scene keyframes in the first place.
+    from becoming scene keyframes in the first place.
     """
     arr = np.asarray(image.convert("RGB"))
     gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
     faces = _face_detector().detectMultiScale(gray, scaleFactor=1.07, minNeighbors=5, minSize=(48, 48))
-    if not len(faces):
+    face_count = int(len(faces))
+    if face_count == 0:
         return {"passed": False, "reason": "no_face_detected", "score": -1.0, "face_count": 0}
+    if face_count > MAX_FACE_COUNT:
+        return {
+            "passed": False,
+            "reason": "multiple_faces_detected",
+            "score": -0.75,
+            "face_count": face_count,
+            "max_face_count": MAX_FACE_COUNT,
+        }
 
     x, y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
     area_ratio = float(w * h) / float(arr.shape[0] * arr.shape[1])
@@ -184,7 +194,8 @@ def inspect_visible_face(image: Image.Image):
         "passed": passed,
         "reason": reason,
         "score": round(score, 6),
-        "face_count": int(len(faces)),
+        "face_count": face_count,
+        "max_face_count": MAX_FACE_COUNT,
         "face_area_ratio": round(area_ratio, 6),
         "face_sharpness": round(sharpness, 3),
         "face_box": [int(x), int(y), int(w), int(h)],
@@ -216,7 +227,7 @@ def rebuild_index(manifest, primary_photo, out):
             "reference": None if secondary_only else primary_photo,
             "focus": "SECONDARY" if secondary_only else "AI_CLONE",
             "identity_lock": f"face-crop-ip-adapter-{IDENTITY_SCALE:.2f}" if not secondary_only else "off-camera",
-            "render_guard": "face-presence-size-sharpness-v1" if not secondary_only else "not-required",
+            "render_guard": "single-face-presence-size-sharpness-v2" if not secondary_only else "not-required",
         })
     (out / "keyframes.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -346,7 +357,7 @@ def main():
             "identity_regression_policy": "zero-tolerance-at-release-gate" if not secondary_only else "not-applicable",
             "render_guard": chosen_guard,
             "attempts": attempts_log,
-            "note": "Render guard prevents missing/tiny/soft faces; identity similarity is still enforced by downstream clone quality and stable-vs-challenger gates.",
+            "note": "Render guard rejects missing, duplicate, tiny, oversized or soft faces; identity similarity is still enforced by downstream clone quality and stable-vs-challenger gates.",
         }
         audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(
