@@ -17,13 +17,12 @@ STORAGE_ROOT = Path(os.environ.get('AI_TWIN_STORAGE', '/workspace/zaskaleta-stor
 OUTPUT_ROOT = Path(os.environ.get('AI_TWIN_OUTPUT', STORAGE_ROOT / 'api_jobs')).resolve()
 API_TOKEN = os.environ.get('AI_TWIN_TOKEN', '').strip()
 PYTHON_BIN = os.environ.get('AI_TWIN_PYTHON', sys.executable)
-CANONICAL_DRIVE_FOLDER_ID = os.environ.get('AI_TWIN_DRIVE_FOLDER_ID', '1_7G-rAGQ80Vpe_CWdGOzPIg0nuprDp3s').strip()
-DRIVE_SYNC_ENABLED = os.environ.get('AI_TWIN_DRIVE_SYNC', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
 CORS_ORIGINS = [x.strip() for x in os.environ.get('AI_TWIN_CORS_ORIGINS', 'https://ai.zaskaleta.net').split(',') if x.strip()]
+STORAGE_CONFIG = APP_ROOT / 'content' / 'storage_config.json'
 
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.3.0')
+app = FastAPI(title='Zaskaleta AI Clone GPU API', version='0.4.0')
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -45,9 +44,6 @@ class RenderRequest(BaseModel):
     format: str = Field(default='9:16', pattern='^(9:16)$')
     voicePreset: str = 'conversational'
     seconds: float = Field(default=12.0, ge=8.0, le=15.0)
-    photo: str | None = None
-    voice: str | None = None
-    referenceVideo: str | None = None
 
 
 def auth(authorization: str | None):
@@ -56,6 +52,33 @@ def auth(authorization: str | None):
     expected = f'Bearer {API_TOKEN}'
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail='Unauthorized')
+
+
+def load_storage_contract() -> tuple[bool, dict]:
+    try:
+        cfg = json.loads(STORAGE_CONFIG.read_text(encoding='utf-8'))
+    except Exception:
+        return False, {}
+    canonical = cfg.get('canonical_storage') or {}
+    runtime = cfg.get('runtime') or {}
+    legacy = cfg.get('legacy_source_import') or {}
+    migration = cfg.get('legacy_canonical_migration') or {}
+    valid = (
+        cfg.get('schema') == 'zaskaleta-storage-v2'
+        and canonical.get('provider') == 's3_compatible'
+        and canonical.get('required_region_policy') == 'EU_ONLY'
+        and canonical.get('versioning_required') is True
+        and canonical.get('required_client_side_encryption_for_biometrics') is True
+        and runtime.get('delete_temporary_plaintext_after_job') is True
+        and legacy.get('production_dependency') is False
+        and migration.get('production_dependency') is False
+    )
+    return valid, cfg
+
+
+def storage_runtime_ready() -> bool:
+    valid, _ = load_storage_contract()
+    return valid and STORAGE_ROOT.is_dir() and os.access(STORAGE_ROOT, os.R_OK | os.W_OK)
 
 
 def state_path(job_id: str) -> Path:
@@ -80,24 +103,11 @@ def write_state(job_id: str, **changes):
     os.replace(tmp_path, path)
 
 
-def pull_canonical_drive(job_id: str):
-    if not DRIVE_SYNC_ENABLED:
-        return
-    write_state(job_id, status='processing', stage='storage_sync')
-    cmd = [
-        PYTHON_BIN,
-        str(APP_ROOT / 'worker' / 'fixed_drive_folder_sync.py'),
-        'pull',
-        '--folder-id', CANONICAL_DRIVE_FOLDER_ID,
-        '--local-dir', str(STORAGE_ROOT),
-    ]
-    subprocess.run(cmd, check=True, env=os.environ.copy())
-
-
 def run_job(job_id: str, req: RenderRequest):
     job_dir = OUTPUT_ROOT / job_id
     try:
-        pull_canonical_drive(job_id)
+        if not storage_runtime_ready():
+            raise RuntimeError('S3 storage contract or runtime mount is not ready')
         write_state(job_id, status='processing', stage='voice')
         cmd = [
             PYTHON_BIN,
@@ -148,19 +158,23 @@ def run_job(job_id: str, req: RenderRequest):
 
 @app.get('/health')
 def health():
+    storage_contract_valid, _ = load_storage_contract()
     return {
         'ok': True,
         'service': 'zaskaleta-ai-clone',
-        'version': '0.3.0',
+        'version': '0.4.0',
         'root_exists': APP_ROOT.exists(),
         'storage_exists': STORAGE_ROOT.exists(),
+        'storage_provider': 's3_compatible',
+        'storage_contract_valid': storage_contract_valid,
+        'storage_runtime_ready': storage_runtime_ready(),
+        'google_drive_production_dependency': False,
         'python': PYTHON_BIN,
         'auth_configured': bool(API_TOKEN),
-        'drive_sync_enabled': DRIVE_SYNC_ENABLED,
-        'canonical_drive_folder_configured': bool(CANONICAL_DRIVE_FOLDER_ID),
         'cors_origins': CORS_ORIGINS,
         'gpu_expected': True,
         'automatic_master_promotion': False,
+        'secret_values_exposed': False,
     }
 
 
@@ -171,6 +185,8 @@ def render(req: RenderRequest, background_tasks: BackgroundTasks, authorization:
         raise HTTPException(status_code=400, detail='script is required')
     if req.voicePreset not in {'calm', 'confident', 'serious', 'warm', 'motivational', 'conversational'}:
         raise HTTPException(status_code=400, detail='unsupported voicePreset')
+    if not storage_runtime_ready():
+        raise HTTPException(status_code=503, detail='S3 storage contract or runtime mount is not ready')
     job_id = uuid.uuid4().hex
     write_state(
         job_id,
