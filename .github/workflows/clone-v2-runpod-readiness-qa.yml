@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - 'runpod/api_server.py'
+      - 'runpod/requirements-api.txt'
       - 'runpod/clone_v2_readiness.py'
       - 'runpod/preflight.py'
       - 'worker/run_clone_v2_test.py'
@@ -35,8 +37,7 @@ on:
       - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
   pull_request:
     paths:
-      - 'runpod/clone_v2_readiness.py'
-      - 'runpod/preflight.py'
+      - 'runpod/**'
       - 'worker/**'
       - 'content/**'
       - '.github/workflows/clone-v2-runpod-readiness-qa.yml'
@@ -56,6 +57,7 @@ jobs:
       - name: Syntax sanity
         run: |
           python -m py_compile \
+            runpod/api_server.py \
             runpod/clone_v2_readiness.py \
             runpod/preflight.py \
             worker/storage_backend.py
@@ -63,12 +65,55 @@ jobs:
         run: python runpod/clone_v2_readiness.py
       - name: Validate S3 storage policy without secrets or network calls
         run: python worker/storage_backend.py
+      - name: Enforce Drive-free API runtime and minimal dependencies
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          api = Path('runpod/api_server.py').read_text(encoding='utf-8')
+          req = Path('runpod/requirements-api.txt').read_text(encoding='utf-8')
+
+          required = [
+              "'storage_provider': 's3_compatible'",
+              "'google_drive_production_dependency': False",
+              "'storage_contract_valid': storage_contract_valid",
+              "'storage_runtime_ready': storage_runtime_ready()",
+              "'secret_values_exposed': False",
+              "version='0.4.0'",
+          ]
+          missing = [token for token in required if token not in api]
+          if missing:
+              raise SystemExit('Clone API storage contract missing: ' + ', '.join(missing))
+
+          forbidden_api = [
+              'AI_TWIN_DRIVE_SYNC',
+              'AI_TWIN_DRIVE_FOLDER_ID',
+              'CANONICAL_DRIVE_FOLDER_ID',
+              'DRIVE_SYNC_ENABLED',
+              'pull_canonical_drive',
+              'fixed_drive_folder_sync.py',
+              "photo: str | None",
+              "voice: str | None",
+              "referenceVideo: str | None",
+          ]
+          hits = [token for token in forbidden_api if token in api]
+          if hits:
+              raise SystemExit('Legacy Drive/path override behavior remains in Clone API: ' + ', '.join(hits))
+
+          forbidden_deps = ['google-auth', 'google-api-python-client']
+          dep_hits = [token for token in forbidden_deps if token in req]
+          if dep_hits:
+              raise SystemExit('Obsolete Google runtime dependencies remain: ' + ', '.join(dep_hits))
+
+          print('Clone API runtime is Drive-free, fail-closed on storage readiness, and exposes no caller-controlled biometric paths')
+          PY
       - name: Assert no paid GPU or secret side effects
         run: |
           python - <<'PY'
           from pathlib import Path
 
           files = [
+              Path('runpod/api_server.py'),
               Path('runpod/clone_v2_readiness.py'),
               Path('runpod/preflight.py'),
           ]
@@ -104,5 +149,5 @@ jobs:
           if hits:
               raise SystemExit('Forbidden provisioning/secret/legacy-drive behavior found: ' + ', '.join(hits))
 
-          print('RunPod readiness/preflight cannot provision paid GPU, expose secrets, or depend on Google Drive')
+          print('RunPod/API readiness cannot provision paid GPU, expose secrets, or depend on Google Drive')
           PY
