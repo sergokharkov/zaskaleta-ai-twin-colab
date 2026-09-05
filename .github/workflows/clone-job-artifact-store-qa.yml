@@ -1,0 +1,58 @@
+name: Clone Job Artifact Store QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/clone_job_artifact_store.py'
+      - 'runpod/api_server.py'
+      - 'content/storage_config.json'
+      - '.github/workflows/clone-job-artifact-store-qa.yml'
+  pull_request:
+    paths:
+      - 'worker/clone_job_artifact_store.py'
+      - 'runpod/api_server.py'
+      - 'content/storage_config.json'
+      - '.github/workflows/clone-job-artifact-store-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-store-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile worker/clone_job_artifact_store.py runpod/api_server.py
+      - name: Enforce encrypted artifact lifecycle invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          store = Path('worker/clone_job_artifact_store.py').read_text(encoding='utf-8')
+          api = Path('runpod/api_server.py').read_text(encoding='utf-8')
+          required_store = [
+              'AES-256-GCM', 'VERIFIED_DECRYPTED_SHA256', 'source_sha256', 'source_size_bytes',
+              'artifact_manifest_v1.json', "sub.add_parser('persist')", "sub.add_parser('restore')",
+              'strict_key', 'secret_values_exposed', "rel == 'job.json'", "rel.startswith('_runtime_assets/')",
+          ]
+          missing = [x for x in required_store if x not in store]
+          if missing:
+              raise SystemExit('Artifact store contract missing: ' + ', '.join(missing))
+          required_api = [
+              'persist_job_artifacts', 'restore_artifact', 'artifacts_persisted_encrypted=True',
+              'cleanup_job_plaintext', 'plaintext_job_artifacts_cleaned', 'BackgroundTask', 'JOB_ID_RE',
+          ]
+          missing = [x for x in required_api if x not in api]
+          if missing:
+              raise SystemExit('API encrypted artifact lifecycle missing: ' + ', '.join(missing))
+          forbidden = ['print(os.environ)', 'print(values)', 'print(key)', 'delete_bucket(', 'runpodctl']
+          hits = [x for x in forbidden if x in store + '\n' + api]
+          if hits:
+              raise SystemExit('Unsafe artifact storage behavior found: ' + ', '.join(hits))
+          print('Encrypted job artifact persistence/restore is fail-closed and secret-safe')
+          PY
