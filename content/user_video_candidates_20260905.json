@@ -1,0 +1,53 @@
+{
+  "schema": "zaskaleta-user-video-candidates-v1",
+  "createdAt": "2026-09-05T10:07:00+02:00",
+  "policy": {
+    "rawMediaInGitHub": false,
+    "autoApprove": false,
+    "manualReviewRequired": true,
+    "allowedPromotionTargets": ["MOTION", "TALKING", "VOICE", "IDENTITY_SUPPORT"],
+    "identityAnchorReplacementAllowed": false
+  },
+  "candidates": [
+    {
+      "filename": "53693.mp4",
+      "status": "candidate",
+      "recommendedTargets": ["TALKING", "MOTION"],
+      "priority": "high",
+      "notes": ["useful talking behavior", "head motion", "facial expression timing"],
+      "approvedForMasterClone": false
+    },
+    {
+      "filename": "50380.mp4",
+      "status": "candidate",
+      "recommendedTargets": ["TALKING", "IDENTITY_SUPPORT"],
+      "priority": "medium",
+      "notes": ["face and talking style reference", "edited footage and overlays must be excluded from learning"],
+      "approvedForMasterClone": false
+    },
+    {
+      "filename": "50280.mp4",
+      "status": "candidate",
+      "recommendedTargets": ["MOTION", "TALKING"],
+      "priority": "high",
+      "notes": ["natural selfie motion", "head movement", "micro-expression reference"],
+      "approvedForMasterClone": false
+    },
+    {
+      "filename": "48025.mp4",
+      "status": "candidate",
+      "recommendedTargets": ["MOTION"],
+      "priority": "medium",
+      "notes": ["mixed footage", "segment-level extraction only", "do not approve entire clip as one reference"],
+      "approvedForMasterClone": false
+    },
+    {
+      "filename": "43229.mp4",
+      "status": "candidate_hold",
+      "recommendedTargets": [],
+      "priority": "low",
+      "notes": ["subject visibility insufficient for reliable clone learning", "retain only if later segment extraction finds usable frames"],
+      "approvedForMasterClone": false
+    }
+  ]
+}
