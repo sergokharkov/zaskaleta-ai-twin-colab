@@ -52,9 +52,14 @@ jobs:
           from pathlib import Path
           paths = [Path('content/storage_config.json'), Path('worker/storage_backend.py')]
           text = '\n'.join(p.read_text(encoding='utf-8') for p in paths)
-          forbidden = ['-----BEGIN PRIVATE KEY-----', 'aws_secret_access_key=', 'AI_TWIN_STORAGE_SECRET_ACCESS_KEY=', 'AI_TWIN_DATA_ENCRYPTION_KEY=']
+          forbidden = [
+              '-----BEGIN ' + 'PRIVATE KEY-----',
+              'aws_secret_access_key=',
+              'AI_TWIN_STORAGE_SECRET_ACCESS_KEY=',
+              'AI_TWIN_DATA_ENCRYPTION_KEY=',
+          ]
           hits = [x for x in forbidden if x in text]
           if hits:
-              raise SystemExit('Embedded storage secret material detected: ' + ', '.join(hits))
+              raise SystemExit('Embedded storage secret material detected')
           print('No embedded object-storage or encryption secrets detected')
           PY
