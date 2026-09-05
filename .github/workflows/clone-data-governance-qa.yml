@@ -60,7 +60,8 @@ jobs:
           checks = {
             'worker/validate_clone_memory_event.py': [
               'automatic_self_training_forbidden', 'approved_memory_requires_manual_approval',
-              'raw_biometric_payload_forbidden', 'rejected_memory_cannot_train'
+              'raw_biometric_payload_forbidden', 'rejected_memory_cannot_train',
+              'recursive_secret_scan_enforced', 'secret_value_signature_scan_enforced'
             ],
             'worker/validate_storage_migration_manifest.py': [
               'BLOCK_MIGRATION', 'object_', 'secret_field_forbidden', 'PASS_TO_RESTORE_TEST'
@@ -79,6 +80,45 @@ jobs:
               if missing:
                   raise SystemExit(f'{path} missing safeguards: {missing}')
           print('Clone data governance validators are fail-closed')
+          PY
+      - name: Exercise recursive Clone Memory rejection
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys, tempfile
+          from pathlib import Path
+          base = {
+            'memory_id': 'ci-memory-1',
+            'domain': 'provenance',
+            'version': 1,
+            'source_type': 'synthetic_ci',
+            'source_ref': 'ci://synthetic',
+            'source_sha256': 'a' * 64,
+            'created_at': '2026-09-05T00:00:00Z',
+            'decision': 'CANDIDATE',
+            'notes': 'CI only',
+            'automatic_self_training': False,
+          }
+          with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            good = td / 'good.json'
+            good.write_text(json.dumps(base), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_clone_memory_event.py', '--event', str(good)]).returncode != 0:
+              raise SystemExit('Valid Clone Memory event was rejected')
+
+            nested_secret = dict(base)
+            nested_secret['metadata'] = {'runtime': {'client_secret': 'do-not-store-this'}}
+            bad1 = td / 'bad-secret.json'
+            bad1.write_text(json.dumps(nested_secret), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_clone_memory_event.py', '--event', str(bad1)]).returncode == 0:
+              raise SystemExit('Nested secret field was not rejected')
+
+            nested_biometric = dict(base)
+            nested_biometric['metadata'] = {'payload': {'raw_voice_payload': 'forbidden'}}
+            bad2 = td / 'bad-biometric.json'
+            bad2.write_text(json.dumps(nested_biometric), encoding='utf-8')
+            if subprocess.run([sys.executable, 'worker/validate_clone_memory_event.py', '--event', str(bad2)]).returncode == 0:
+              raise SystemExit('Nested raw biometric payload was not rejected')
+          print('Recursive Clone Memory secret/biometric rejection works')
           PY
       - name: Reject secret or raw biometric payload patterns in policies
         run: |
