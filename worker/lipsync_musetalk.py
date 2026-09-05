@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -6,6 +8,14 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def write_config(path: pathlib.Path, media: pathlib.Path, audio: pathlib.Path):
@@ -66,6 +76,8 @@ def main():
     parser.add_argument('--reference-video', default='')
     parser.add_argument('--audio', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--provenance-output', default='', help='Optional JSON output for immutable render provenance evidence.')
+    parser.add_argument('--candidate-id', default='')
     parser.add_argument(
         '--allow-photo-fallback',
         action='store_true',
@@ -81,6 +93,7 @@ def main():
     reference = pathlib.Path(args.reference_video).resolve() if args.reference_video else None
     audio = pathlib.Path(args.audio).resolve()
     output = pathlib.Path(args.output).resolve()
+    provenance_output = pathlib.Path(args.provenance_output).resolve() if args.provenance_output else output.with_suffix(output.suffix + '.provenance.json')
 
     if not photo.is_file():
         raise FileNotFoundError(photo)
@@ -91,6 +104,12 @@ def main():
             f'Approved reference video is required for MASTER CLONE lipsync: {reference}'
         )
 
+    source_hashes = {
+        'canonical_photo_sha256': sha256_file(photo),
+        'approved_reference_video_sha256': sha256_file(reference),
+        'speech_audio_sha256': sha256_file(audio),
+    }
+
     media_candidates = [('approved-animated-reference', reference)]
     if args.allow_photo_fallback:
         media_candidates.append(('explicit-keyframe-fallback', photo))
@@ -98,8 +117,6 @@ def main():
     model_dir = root / 'models' / 'musetalkV15'
     failures = []
 
-    # MuseTalk internally invokes ffmpeg with shell-style command strings, so run
-    # inference from simple local /content paths and copy only the finished MP4 back.
     with tempfile.TemporaryDirectory(prefix='zaskaleta_musetalk_', dir='/content') as tmp_name:
         tmp = pathlib.Path(tmp_name)
         local_audio = copy_local(audio, tmp, 'audio')
@@ -111,8 +128,6 @@ def main():
             config = attempt_dir / 'task.yaml'
             write_config(config, local_media, local_audio)
 
-            # T4 normally benefits from batch 8. If VRAM is insufficient, retry the
-            # same approved media automatically with batch 4 rather than changing identity/motion input.
             for batch_size in (8, 4):
                 attempt_results = attempt_dir / f'results_b{batch_size}'
                 attempt_results.mkdir(parents=True, exist_ok=True)
@@ -129,7 +144,33 @@ def main():
                 if result.returncode == 0 and rendered is not None:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(rendered, output)
+                    if not output.is_file() or output.stat().st_size <= 0:
+                        raise RuntimeError('MuseTalk reported success but final output is missing or empty')
+
+                    render_sha = sha256_file(output)
+                    evidence = {
+                        'schema': 'zaskaleta-lipsync-render-provenance-v1',
+                        'candidate_id': args.candidate_id.strip() or None,
+                        'engine': 'MuseTalk',
+                        'engine_version': '1.5',
+                        'render_mode': label,
+                        'batch_size': batch_size,
+                        'photo_fallback_allowed': bool(args.allow_photo_fallback),
+                        'photo_fallback_used': label == 'explicit-keyframe-fallback',
+                        'approved_motion_reference_required': True,
+                        'source_hashes': source_hashes,
+                        'output': {
+                            'path': str(output),
+                            'sha256': render_sha,
+                            'size_bytes': output.stat().st_size,
+                        },
+                        'provenance_complete': True,
+                        'auto_promote': False,
+                    }
+                    provenance_output.parent.mkdir(parents=True, exist_ok=True)
+                    provenance_output.write_text(json.dumps(evidence, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
                     print(f'✅ MuseTalk output ({label}, batch={batch_size}): {output}')
+                    print(f'🔐 Provenance: {provenance_output}')
                     return
 
                 tail = ((result.stdout or '') + '\n' + (result.stderr or ''))[-7000:]
