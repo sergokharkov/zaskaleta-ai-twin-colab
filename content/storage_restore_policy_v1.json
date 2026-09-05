@@ -1,0 +1,30 @@
+{
+  "schema": "zaskaleta-storage-restore-policy-v1",
+  "restore_mode": "verify_before_replace",
+  "rules": {
+    "restore_test_required": true,
+    "restore_to_isolated_staging_first": true,
+    "source_object_manifest_required": true,
+    "encrypted_object_sha256_required": true,
+    "decrypted_sha256_must_match_original": true,
+    "object_count_must_match_manifest": true,
+    "missing_object_blocks_restore": true,
+    "hash_mismatch_blocks_restore": true,
+    "production_overwrite_forbidden": true,
+    "manual_cutover_required_after_restore": true,
+    "encryption_key_must_not_be_stored_in_restore_bundle": true,
+    "secret_values_must_not_be_logged": true
+  },
+  "required_restore_evidence": [
+    "manifest_sha256",
+    "object_count_expected",
+    "object_count_restored",
+    "objects_verified",
+    "objects_failed",
+    "restore_started_at",
+    "restore_completed_at",
+    "staging_location",
+    "decision"
+  ],
+  "decision_values": ["PASS_TO_MANUAL_CUTOVER_REVIEW", "BLOCK_RESTORE"]
+}
