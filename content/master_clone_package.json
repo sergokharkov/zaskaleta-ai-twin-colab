@@ -142,6 +142,41 @@
     ],
     "rule": "Never auto-train on all generated outputs. Only APPROVED material may become future reference material."
   },
+  "improvement_lifecycle": {
+    "stable_release_is_immutable": true,
+    "candidate_quarantine_required": true,
+    "manual_promotion_required": true,
+    "holdout_regression_set": true,
+    "single_component_change_preferred": true,
+    "required_lineage": [
+      "clone_version",
+      "code_commit",
+      "model_versions",
+      "input_reference_ids",
+      "prompt_or_script",
+      "voice_preset",
+      "motion_preset",
+      "generation_timestamp",
+      "quality_evaluation"
+    ],
+    "promotion_rule": "A challenger version may become stable only after passing every mandatory gate and showing no identity regression versus the current stable release.",
+    "rollback_rule": "Never overwrite a stable release in place. Keep prior release manifests and assets addressable for immediate rollback.",
+    "generated_data_rule": "Generated material enters training/reference pools only after explicit APPROVED review. REJECTED material is permanently excluded from promotion datasets."
+  },
+  "evaluation_dimensions": [
+    "identity consistency",
+    "face drift",
+    "beard and hair consistency",
+    "lip-sync naturalness",
+    "jaw and cheek motion",
+    "blink and eye behavior",
+    "head micro-motion",
+    "voice similarity and naturalness",
+    "speech intelligibility",
+    "audio-video sync",
+    "duration correctness",
+    "motion naturalness"
+  ],
   "test_gates": [
     {"stage":"8-15s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
     {"stage":"15-30s","advance_when":["identity stable","lip-sync natural","voice natural","motion natural","no face drift"]},
@@ -157,9 +192,13 @@
     "MASTER_CLONE/MOTION/REJECTED",
     "MASTER_CLONE/TALKING",
     "MASTER_CLONE/VOICE",
+    "MASTER_CLONE/CANDIDATES",
+    "MASTER_CLONE/EVALUATIONS",
+    "MASTER_CLONE/TRAINING_SETS",
     "MASTER_CLONE/APPROVED",
     "MASTER_CLONE/REJECTED",
-    "MASTER_CLONE/VERSIONS"
+    "MASTER_CLONE/VERSIONS",
+    "MASTER_CLONE/RELEASES"
   ],
   "scene_independence": {
     "scene": "external",
