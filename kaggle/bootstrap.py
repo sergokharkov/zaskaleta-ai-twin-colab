@@ -85,7 +85,18 @@ def install_core(uv: str) -> None:
 
 def install_openvoice() -> None:
     ensure_repo("https://github.com/myshell-ai/OpenVoice.git", OPENVOICE)
-    run([str(PY), "-m", "pip", "install", "-e", str(OPENVOICE)])
+    # OpenVoice upstream pins an old faster-whisper/av stack that source-builds
+    # av==10 on Kaggle Python 3.11. MASTER CLONE only needs ToneColorConverter,
+    # so install the package without upstream extras and add the pure/runtime
+    # dependencies required by openvoice.api. Watermarking is disabled by our
+    # worker adapter, so wavmark/faster-whisper/gradio are intentionally omitted.
+    run([
+        str(PY), "-m", "pip", "install",
+        "eng_to_ipa==0.0.2", "inflect==7.0.0", "unidecode==1.3.7",
+        "pypinyin==0.50.0", "cn2an==0.5.22", "jieba==0.42.1", "langid==1.1.6",
+    ])
+    run([str(PY), "-m", "pip", "install", "--no-deps", "-e", str(OPENVOICE)])
+    run([str(PY), "-c", "from openvoice.api import ToneColorConverter; print('OpenVoice ToneColorConverter: OK')"])
 
 
 def install_musetalk() -> None:
