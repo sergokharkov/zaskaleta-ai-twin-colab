@@ -1,6 +1,9 @@
 import argparse
+import hashlib
 import json
+import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,12 +14,40 @@ def ensure_dirs(root: Path):
         (root / name).mkdir(parents=True, exist_ok=True)
 
 
+def sha256_file(path: Path, chunk_size: int = 1024 * 1024):
+    digest = hashlib.sha256()
+    with path.open('rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def file_record(path: Path, package_root: Path):
+    return {
+        'path': str(path.relative_to(package_root)).replace(os.sep, '/'),
+        'bytes': path.stat().st_size,
+        'sha256': sha256_file(path),
+    }
+
+
 def copy_if_exists(src: Path, dst: Path):
     if src and src.is_file():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        return str(dst)
+        return dst
     return None
+
+
+def atomic_write_json(path: Path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, delete=False) as tmp:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.write('\n')
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, path)
 
 
 def main():
@@ -65,6 +96,7 @@ def main():
 
     profile = assets.get('profile', {})
     package_manifest = {
+        'schema': 'zaskaleta-master-clone-manifest-v2',
         'package_name': spec.get('package_name', 'Zaskaleta MASTER CLONE'),
         'version': args.version,
         'created_at': datetime.now(timezone.utc).isoformat(),
@@ -84,15 +116,32 @@ def main():
         },
         'approved_policy': spec['reference_policy']['approved'],
         'rejected_policy': spec['reference_policy']['rejected'],
-        'test_gates': spec['test_gates']
+        'test_gates': spec['test_gates'],
+        'reference_integrity': {
+            'algorithm': 'sha256',
+            'identity': [file_record(p, package) for p in copied['identity']],
+            'motion': [file_record(p, package) for p in copied['motion']],
+            'voice': file_record(copied['voice'], package) if copied['voice'] else None,
+        },
+        'approval_state': {
+            'automatic_master_promotion': False,
+            'manual_review_required': True,
+        },
     }
 
-    (package / 'MASTER_CLONE_MANIFEST.json').write_text(
-        json.dumps(package_manifest, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-    (versions_dir / 'manifest.json').write_text(
-        json.dumps(package_manifest, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
+    manifest_path = package / 'MASTER_CLONE_MANIFEST.json'
+    atomic_write_json(manifest_path, package_manifest)
+    atomic_write_json(versions_dir / 'manifest.json', package_manifest)
+
+    integrity_payload = {
+        'schema': 'zaskaleta-master-clone-integrity-v1',
+        'version': args.version,
+        'created_at': package_manifest['created_at'],
+        'manifest_sha256': sha256_file(manifest_path),
+        'references': package_manifest['reference_integrity'],
+    }
+    atomic_write_json(versions_dir / 'integrity.json', integrity_payload)
+
     (package / 'APPROVED' / 'README.txt').write_text(
         'Only real photos, real videos, real voice, and manually approved generations belong here.\n',
         encoding='utf-8'
@@ -101,18 +150,10 @@ def main():
         'Put face drift, wrong beard/age/mouth/jaw, unnatural motion, and wrong identity results here.\n',
         encoding='utf-8'
     )
-    (package / 'TALKING' / 'PROFILE.json').write_text(
-        json.dumps(spec['components']['talking'], ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-    (package / 'MOTION' / 'PROFILE.json').write_text(
-        json.dumps(spec['components']['motion'], ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-    (package / 'VOICE' / 'PROFILE.json').write_text(
-        json.dumps(spec['components']['voice'], ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-    (package / 'IDENTITY' / 'PROFILE.json').write_text(
-        json.dumps(spec['components']['identity'], ensure_ascii=False, indent=2), encoding='utf-8'
-    )
+    atomic_write_json(package / 'TALKING' / 'PROFILE.json', spec['components']['talking'])
+    atomic_write_json(package / 'MOTION' / 'PROFILE.json', spec['components']['motion'])
+    atomic_write_json(package / 'VOICE' / 'PROFILE.json', spec['components']['voice'])
+    atomic_write_json(package / 'IDENTITY' / 'PROFILE.json', spec['components']['identity'])
 
     print('✅ MASTER CLONE PACKAGE READY')
     print('ROOT=' + str(package))
@@ -120,6 +161,7 @@ def main():
     print('IDENTITY_REFERENCES=' + str(len(copied['identity'])))
     print('MOTION_REFERENCES=' + str(len(copied['motion'])))
     print('MASTER_VOICE=' + str(bool(copied['voice'])))
+    print('MANIFEST_SHA256=' + integrity_payload['manifest_sha256'])
 
 
 if __name__ == '__main__':
