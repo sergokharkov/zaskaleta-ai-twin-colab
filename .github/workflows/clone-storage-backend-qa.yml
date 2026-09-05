@@ -1,0 +1,60 @@
+name: Clone Storage Backend QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/storage_config.json'
+      - 'worker/storage_backend.py'
+      - '.github/workflows/clone-storage-backend-qa.yml'
+  pull_request:
+    paths:
+      - 'content/storage_config.json'
+      - 'worker/storage_backend.py'
+      - '.github/workflows/clone-storage-backend-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  storage-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax sanity
+        run: python -m py_compile worker/storage_backend.py
+      - name: Validate storage policy
+        run: python worker/storage_backend.py
+      - name: Enforce no Google Drive production dependency
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg = json.loads(Path('content/storage_config.json').read_text(encoding='utf-8'))
+          assert cfg['schema'] == 'zaskaleta-storage-v2'
+          assert cfg['canonical_storage']['provider'] == 's3_compatible'
+          assert cfg['canonical_storage']['required_region_policy'] == 'EU_ONLY'
+          assert cfg['canonical_storage']['required_client_side_encryption_for_biometrics'] is True
+          assert cfg['canonical_storage']['versioning_required'] is True
+          assert cfg['legacy_source_import']['production_dependency'] is False
+          assert cfg['legacy_canonical_migration']['production_dependency'] is False
+          assert cfg['runtime']['delete_temporary_plaintext_after_job'] is True
+          assert cfg['runtime']['never_commit_private_biometric_media'] is True
+          print('MASTER CLONE storage is provider-agnostic, encrypted, versioned, and not production-dependent on Google Drive')
+          PY
+      - name: Reject embedded secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          paths = [Path('content/storage_config.json'), Path('worker/storage_backend.py')]
+          text = '\n'.join(p.read_text(encoding='utf-8') for p in paths)
+          forbidden = ['-----BEGIN PRIVATE KEY-----', 'aws_secret_access_key=', 'AI_TWIN_STORAGE_SECRET_ACCESS_KEY=', 'AI_TWIN_DATA_ENCRYPTION_KEY=']
+          hits = [x for x in forbidden if x in text]
+          if hits:
+              raise SystemExit('Embedded storage secret material detected: ' + ', '.join(hits))
+          print('No embedded object-storage or encryption secrets detected')
+          PY
