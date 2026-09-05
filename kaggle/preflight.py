@@ -97,10 +97,21 @@ def main() -> int:
 
     try:
         duration = json.loads((ROOT / "content/clone_duration_gate_policy_v1.json").read_text(encoding="utf-8"))
-        raw = duration.get("gates") or duration.get("duration_gates") or []
-        text = json.dumps(raw)
-        first_ok = "8" in text and "15" in text
-        checks.append(check("first_duration_gate_8_15", first_ok, "8-15 gate present" if first_ok else "gate not found"))
+        ordered = duration.get("ordered_gates")
+        rules = duration.get("rules") or {}
+        first = ordered[0] if isinstance(ordered, list) and ordered else {}
+        first_ok = (
+            first.get("id") == "gate_08_15"
+            and first.get("min_seconds") == 8
+            and first.get("max_seconds") == 15
+            and rules.get("start_at_first_gate") is True
+            and rules.get("sequential_only") is True
+            and rules.get("skip_gate_allowed") is False
+            and rules.get("manual_override_allowed") is False
+            and float(rules.get("identity_regression_tolerance", 1)) == 0.0
+        )
+        detail = "8-15 first gate present; sequential/no-skip/zero-regression enforced" if first_ok else "first duration gate policy invalid"
+        checks.append(check("first_duration_gate_8_15", first_ok, detail))
     except Exception as exc:
         checks.append(check("first_duration_gate_8_15", False, type(exc).__name__))
 
