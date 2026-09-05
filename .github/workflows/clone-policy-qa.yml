@@ -14,6 +14,7 @@ on:
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
+      - 'worker/run_clone_v2_test.py'
       - '.github/workflows/clone-policy-qa.yml'
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - 'worker/evaluate_clone_release.py'
       - 'worker/compare_clone_challenger.py'
       - 'worker/generate_scene_keyframes.py'
+      - 'worker/run_clone_v2_test.py'
       - '.github/workflows/clone-policy-qa.yml'
 
 permissions:
@@ -124,13 +126,44 @@ jobs:
 
           print('Render runtime matches render_face_guard_v1 exactly')
           PY
+      - name: Enforce Clone v2 canonical identity preflight
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('worker/run_clone_v2_test.py').read_text(encoding='utf-8')
+          required = [
+              'Canonical identity photo is not explicitly configured; refusing fallback identity',
+              'Canonical identity mismatch:',
+              'Canonical identity must resolve to exactly one approved photo',
+              'CLONE_V2_IDENTITY_PREFLIGHT.json',
+              "'fallback_identity_allowed': False",
+              'canonical_identity_sha256',
+              'master_voice_sha256',
+              'reference_behavior_sha256',
+          ]
+          missing = [token for token in required if token not in source]
+          if missing:
+              raise SystemExit('Clone v2 identity preflight weakened or missing: ' + ', '.join(missing))
+
+          forbidden = [
+              "next((p for p in photos if p.name == canonical_name), photos[0])",
+              "canonical = photos[0]",
+          ]
+          hits = [token for token in forbidden if token in source]
+          if hits:
+              raise SystemExit('Unsafe Clone v2 identity fallback detected: ' + ', '.join(hits))
+
+          print('Clone v2 canonical identity preflight is enforced with no implicit fallback')
+          PY
       - name: Python syntax sanity
         run: |
           python -m py_compile \
             worker/validate_candidate_registry.py \
             worker/evaluate_clone_release.py \
             worker/compare_clone_challenger.py \
-            worker/generate_scene_keyframes.py
+            worker/generate_scene_keyframes.py \
+            worker/run_clone_v2_test.py
       - name: Reject raw biometric media tracked by Git
         run: |
           python - <<'PY'
