@@ -1,0 +1,62 @@
+name: Kaggle Model Prepare QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kaggle/prepare_models.py'
+      - '.github/workflows/kaggle-model-prepare-qa.yml'
+  pull_request:
+    paths:
+      - 'kaggle/prepare_models.py'
+      - '.github/workflows/kaggle-model-prepare-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax check
+        run: python -m py_compile kaggle/prepare_models.py
+      - name: Assert model contract and safety
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('kaggle/prepare_models.py').read_text(encoding='utf-8')
+          required = [
+              'TMElyralab/MuseTalk',
+              'musetalkV15/unet.pth',
+              'stabilityai/sd-vae-ft-mse',
+              'openai/whisper-tiny',
+              'yzd-v/DWPose',
+              'ByteDance/LatentSync',
+              'myshell-ai/OpenVoiceV2',
+              'converter/checkpoint.pth',
+              'private_biometric_media_touched',
+              'render_started',
+              'auto_promote',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Model preparation contract incomplete: {missing}')
+          forbidden = [
+              'runpodctl',
+              'create_pod(',
+              'create_endpoint(',
+              'git push',
+              'private_biometric_media_touched": True',
+              'render_started": True',
+              'auto_promote": True',
+          ]
+          bad = [x for x in forbidden if x in text]
+          if bad:
+              raise SystemExit(f'Dangerous model preparation side effect: {bad}')
+          print('Model preparation contract OK')
+          PY
