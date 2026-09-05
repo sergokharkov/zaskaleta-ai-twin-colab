@@ -7,12 +7,14 @@ on:
       - 'content/clone_memory_policy_v1.json'
       - 'worker/validate_clone_memory_event.py'
       - 'worker/append_clone_memory_event.py'
+      - 'worker/verify_clone_memory_chain.py'
       - '.github/workflows/clone-memory-runtime-qa.yml'
   pull_request:
     paths:
       - 'content/clone_memory_policy_v1.json'
       - 'worker/validate_clone_memory_event.py'
       - 'worker/append_clone_memory_event.py'
+      - 'worker/verify_clone_memory_chain.py'
       - '.github/workflows/clone-memory-runtime-qa.yml'
 
 permissions:
@@ -28,17 +30,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Syntax sanity
-        run: python -m py_compile worker/validate_clone_memory_event.py worker/append_clone_memory_event.py
-      - name: Append-only runtime smoke test
+        run: python -m py_compile worker/validate_clone_memory_event.py worker/append_clone_memory_event.py worker/verify_clone_memory_chain.py
+      - name: Append-only runtime and hash-chain smoke test
         run: |
           tmp="$(mktemp -d)"
-          cat > "$tmp/event.json" <<'JSON'
+          cat > "$tmp/event1.json" <<'JSON'
           {
             "memory_id": "ci-quality-001",
             "domain": "quality_history",
             "version": "v1",
             "source_type": "ci_test",
-            "source_ref": "synthetic/non-biometric",
+            "source_ref": "synthetic/non-biometric/1",
             "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "created_at": "2026-09-05T00:00:00Z",
             "decision": "CANDIDATE",
@@ -46,24 +48,62 @@ jobs:
             "eligible_for_training": false
           }
           JSON
-          python worker/append_clone_memory_event.py --event "$tmp/event.json" --storage-root "$tmp/storage"
-          test -s "$tmp/storage/MASTER_CLONE/MEMORY/events_v1.jsonl"
-          if python worker/append_clone_memory_event.py --event "$tmp/event.json" --storage-root "$tmp/storage"; then
+          cat > "$tmp/event2.json" <<'JSON'
+          {
+            "memory_id": "ci-quality-002",
+            "domain": "quality_history",
+            "version": "v1",
+            "source_type": "ci_test",
+            "source_ref": "synthetic/non-biometric/2",
+            "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "created_at": "2026-09-05T00:01:00Z",
+            "decision": "CANDIDATE",
+            "notes": "Second CI-only synthetic memory event",
+            "eligible_for_training": false
+          }
+          JSON
+          python worker/append_clone_memory_event.py --event "$tmp/event1.json" --storage-root "$tmp/storage"
+          python worker/append_clone_memory_event.py --event "$tmp/event2.json" --storage-root "$tmp/storage"
+          log="$tmp/storage/MASTER_CLONE/MEMORY/events_v1.jsonl"
+          test -s "$log"
+          python worker/verify_clone_memory_chain.py --log "$log"
+          if python worker/append_clone_memory_event.py --event "$tmp/event1.json" --storage-root "$tmp/storage"; then
             echo 'Duplicate memory_id was incorrectly accepted'
+            exit 1
+          fi
+
+          cp "$log" "$tmp/tampered.jsonl"
+          python - "$tmp/tampered.jsonl" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          rows = p.read_text(encoding='utf-8').splitlines()
+          doc = json.loads(rows[0])
+          doc['notes'] = 'tampered after append'
+          rows[0] = json.dumps(doc, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+          p.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+          PY
+          if python worker/verify_clone_memory_chain.py --log "$tmp/tampered.jsonl"; then
+            echo 'Tampered Clone Memory log was incorrectly accepted'
             exit 1
           fi
       - name: Enforce runtime safety contract
         run: |
           python - <<'PY'
           from pathlib import Path
-          t = Path('worker/append_clone_memory_event.py').read_text(encoding='utf-8')
-          required = ['append_only_versioned', 'duplicate_memory_id', 'os.fsync', "'automatic_self_training'] = False", 'validate_clone_memory_event.py']
-          missing = [x for x in required if x not in t]
+          writer = Path('worker/append_clone_memory_event.py').read_text(encoding='utf-8')
+          verifier = Path('worker/verify_clone_memory_chain.py').read_text(encoding='utf-8')
+          required_writer = ['append_only_versioned', 'duplicate_memory_id', 'os.fsync', "'automatic_self_training'] = False", 'validate_clone_memory_event.py', 'verify_clone_memory_chain.py', 'previous_event_hash', 'event_hash', 'chain_verified_after_append']
+          missing = [x for x in required_writer if x not in writer]
           if missing:
               raise SystemExit('Clone Memory runtime weakened: ' + ', '.join(missing))
+          required_verifier = ['previous_hash_mismatch', 'event_hash_mismatch', 'CHAIN_INVALID', 'duplicate_memory_id']
+          missing = [x for x in required_verifier if x not in verifier]
+          if missing:
+              raise SystemExit('Clone Memory chain verifier weakened: ' + ', '.join(missing))
           forbidden = ['boto3', 'requests.post(', 'runpodctl', 'git add']
-          hits = [x for x in forbidden if x in t]
+          hits = [x for x in forbidden if x in writer + verifier]
           if hits:
-              raise SystemExit('Clone Memory writer has forbidden side effects: ' + ', '.join(hits))
-          print('Clone Memory runtime is append-only, duplicate-safe, validated, and has no training/network side effects')
+              raise SystemExit('Clone Memory runtime has forbidden side effects: ' + ', '.join(hits))
+          print('Clone Memory runtime is append-only, hash-chained, tamper-evident, duplicate-safe, validated, and has no training/network side effects')
           PY
