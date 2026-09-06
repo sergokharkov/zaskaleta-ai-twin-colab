@@ -31,3 +31,15 @@ outputs/
 api_jobs/
 MASTER_CLONE/
 MASTER_CLONE_ENCRYPTED/
+
+# Private MASTER CLONE biometric assets — never commit raw media
+MVIMG_20260830_144834.jpg
+MVIMG_20260830_144843.jpg
+MVIMG_20260830_144606.jpg
+MVIMG_20260830_144457.jpg
+image-1788277947699.jpg
+image-1788277957517.jpg
+Zaskaleta_AI_Voice_Master.mp3
+Zaskaleta_AI_Voice_Master.wav
+MASTER_BEHAVIOR_*.mp4
+VID_20260901_*.mp4
