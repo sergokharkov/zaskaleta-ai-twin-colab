@@ -64,8 +64,8 @@ jobs:
           out = Path('.kaggle-export')
           files = [
               'zaskaleta_autopilot_status.json',
-              'MASTER_CLONE_GATE_08_15.mp4',
-              'MASTER_CLONE_GATE_08_15.provenance.json',
+              'first_gate/MASTER_CLONE_GATE_08_15.mp4',
+              'first_gate/MASTER_CLONE_GATE_08_15.provenance.json',
           ]
           for name in files:
               print(f'Downloading {name}')
