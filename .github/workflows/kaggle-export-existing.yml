@@ -10,10 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: kaggle-master-clone-export-existing
+  cancel-in-progress: true
+
 jobs:
   export-existing:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
@@ -37,7 +41,7 @@ jobs:
       - name: Verify Kaggle authentication
         run: kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
 
-      - name: Download existing safe MASTER CLONE output
+      - name: Download existing safe MASTER CLONE output only
         shell: bash
         run: |
           set -euo pipefail
@@ -52,7 +56,14 @@ jobs:
             exit 1
           fi
 
-          timeout 900 kaggle kernels output "$KERNEL" -p .kaggle-export -q
+          for file in \
+            zaskaleta_autopilot_status.json \
+            MASTER_CLONE_GATE_08_15.mp4 \
+            MASTER_CLONE_GATE_08_15.provenance.json
+          do
+            echo "Downloading $file"
+            timeout 300 kaggle kernels output "$KERNEL" -p .kaggle-export -f "$file" -q
+          done
 
           STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
           VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
