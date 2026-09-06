@@ -107,15 +107,33 @@ jobs:
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
           echo "Following Kaggle logs for ${KERNEL}"
-          # Kaggle CLI follow mode exits when the latest run completes.
           timeout 6600 kaggle kernels logs "$KERNEL" --follow --interval 15 || rc=$?
           rc=${rc:-0}
           if [ "$rc" -eq 124 ]; then
-            echo 'Timed out waiting for Kaggle kernel after 110 minutes.'
+            echo 'Timed out waiting for Kaggle kernel logs after 110 minutes.'
             exit 1
           fi
-          # Always show server-side final status; a failed kernel must fail CI below.
-          kaggle kernels status "$KERNEL"
+
+          # Kaggle log streaming can end a few seconds before server-side output is
+          # finalized. Poll the authoritative kernel status until it is terminal.
+          deadline=$((SECONDS + 600))
+          while :; do
+            status_out="$(kaggle kernels status "$KERNEL" 2>&1)"
+            echo "$status_out"
+            if echo "$status_out" | grep -Eq 'COMPLETE|SUCCESS|ERROR|CANCEL|FAILED'; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo 'Timed out waiting for Kaggle terminal status after log stream ended.'
+              exit 1
+            fi
+            sleep 10
+          done
+
+          if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then
+            echo 'Kaggle kernel finished unsuccessfully.'
+            exit 1
+          fi
 
       - name: Read safe autopilot status only
         shell: bash
@@ -124,14 +142,25 @@ jobs:
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
           rm -rf .kaggle-status
           mkdir -p .kaggle-status
-          # Deliberately download only the small status JSON. Never pull render media
-          # or raw/private biometric assets onto the GitHub runner.
-          kaggle kernels output "$KERNEL" \
-            -p .kaggle-status \
-            --file-pattern '(^|/)zaskaleta_autopilot_status\.json$' \
-            -q
-          STATUS_FILE="$(find .kaggle-status -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
+
+          # Output publication can lag terminal status briefly. Retry only the small
+          # status JSON; never download render media or raw/private biometric assets.
+          STATUS_FILE=''
+          for attempt in $(seq 1 12); do
+            rm -rf .kaggle-status/*
+            kaggle kernels output "$KERNEL" \
+              -p .kaggle-status \
+              --file-pattern '(^|/)zaskaleta_autopilot_status\.json$' \
+              -q || true
+            STATUS_FILE="$(find .kaggle-status -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
+            if [ -n "$STATUS_FILE" ]; then
+              break
+            fi
+            echo "Status JSON not published yet (attempt ${attempt}/12); waiting 10s."
+            sleep 10
+          done
           test -n "$STATUS_FILE" || { echo 'Autopilot status JSON was not produced.'; exit 1; }
+
           python - "$STATUS_FILE" <<'PY'
           import json, pathlib, sys
           p = pathlib.Path(sys.argv[1])
@@ -153,6 +182,9 @@ jobs:
               raise SystemExit(f'Unexpected/failing autopilot state: {state}')
           if data.get('render_completed') is not True:
               raise SystemExit('First gate render did not complete')
+          duration = data.get('first_gate_render_duration_seconds')
+          if not isinstance(duration, (int, float)) or not (8 <= duration <= 15):
+              raise SystemExit(f'First gate duration outside 8-15 seconds: {duration}')
           if data.get('promotion_allowed') is not False or data.get('auto_promote') is not False:
               raise SystemExit('Promotion safety contract was weakened')
           if data.get('stable_release_modified') is not False:
