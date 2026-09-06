@@ -7,6 +7,7 @@ on:
       - 'kaggle/bootstrap.py'
       - 'kaggle/preflight.py'
       - 'kaggle/prepare_models.py'
+      - 'kaggle/auto_prepare.py'
       - '.github/workflows/kaggle-bootstrap-qa.yml'
       - 'worker/lipsync_musetalk.py'
       - 'worker/generate_scene_speech.py'
@@ -19,6 +20,7 @@ on:
       - 'kaggle/bootstrap.py'
       - 'kaggle/preflight.py'
       - 'kaggle/prepare_models.py'
+      - 'kaggle/auto_prepare.py'
       - 'worker/lipsync_musetalk.py'
       - '.github/workflows/kaggle-bootstrap-qa.yml'
 
@@ -36,7 +38,7 @@ jobs:
           python-version: '3.11'
       - name: Syntax check
         run: |
-          python -m py_compile kaggle/bootstrap.py kaggle/preflight.py kaggle/prepare_models.py worker/lipsync_musetalk.py
+          python -m py_compile kaggle/bootstrap.py kaggle/preflight.py kaggle/prepare_models.py kaggle/auto_prepare.py worker/lipsync_musetalk.py
       - name: Assert one-command bootstrap contract
         run: |
           python - <<'PY'
@@ -60,6 +62,29 @@ jobs:
           if missing:
               raise SystemExit(f'Kaggle bootstrap contract weakened: {missing}')
           print('Bootstrap contract present')
+          PY
+      - name: Assert one-command auto prepare contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('kaggle/auto_prepare.py').read_text(encoding='utf-8')
+          required = [
+              'bootstrap',
+              'prepare_public_models',
+              'verify_public_models',
+              'final_preflight',
+              'automatic_prepare_complete',
+              'ready_for_private_asset_mount',
+              'private_biometric_media_touched',
+              'render_started',
+              'auto_promote',
+              'paid_gpu_provisioned',
+              'zaskaleta_auto_prepare.lock',
+          ]
+          missing = [x for x in required if x not in text]
+          if missing:
+              raise SystemExit(f'Auto prepare contract weakened: {missing}')
+          print('Auto prepare contract present')
           PY
       - name: Assert model preparation contract
         run: |
@@ -131,6 +156,7 @@ jobs:
               Path('kaggle/bootstrap.py').read_text(encoding='utf-8'),
               Path('kaggle/preflight.py').read_text(encoding='utf-8'),
               Path('kaggle/prepare_models.py').read_text(encoding='utf-8'),
+              Path('kaggle/auto_prepare.py').read_text(encoding='utf-8'),
               Path('worker/lipsync_musetalk.py').read_text(encoding='utf-8'),
           ])
           forbidden = [
@@ -143,6 +169,7 @@ jobs:
               'auto_promote": True',
               'private_biometric_media_touched": True',
               'paid_gpu_started_by_bootstrap": True',
+              'paid_gpu_provisioned": True',
           ]
           bad = [x for x in forbidden if x in text]
           if bad:
