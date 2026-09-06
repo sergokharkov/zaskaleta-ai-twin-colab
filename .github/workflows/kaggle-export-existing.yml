@@ -1,0 +1,93 @@
+name: Kaggle MASTER CLONE Export Existing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kaggle-export-existing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export-existing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KERNEL_SLUG: ${{ secrets.KAGGLE_KERNEL_SLUG }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate required Kaggle secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${KAGGLE_API_TOKEN:-}" || exit 2
+          test -n "${KAGGLE_USERNAME:-}" || exit 2
+          test -n "${KAGGLE_KERNEL_SLUG:-}" || exit 2
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0'
+
+      - name: Verify Kaggle authentication
+        run: kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
+
+      - name: Download existing safe MASTER CLONE output
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+          rm -rf .kaggle-export .kaggle-review
+          mkdir -p .kaggle-export .kaggle-review
+
+          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
+          echo "$status_out"
+          if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then
+            echo 'Kaggle kernel is not in a usable terminal state.' >&2
+            exit 1
+          fi
+
+          timeout 900 kaggle kernels output "$KERNEL" -p .kaggle-export -q
+
+          STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
+          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
+          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
+
+          test -n "$STATUS_FILE"
+          test -n "$VIDEO_FILE"
+          test -n "$PROV_FILE"
+
+          python - "$STATUS_FILE" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d.get('state') == 'FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW'
+          assert d.get('render_completed') is True
+          duration = d.get('first_gate_render_duration_seconds', d.get('render_duration_seconds', 0))
+          assert 8 <= duration <= 15
+          assert d.get('promotion_allowed') is False
+          assert d.get('stable_release_modified') is False
+          assert d.get('raw_biometrics_written_to_github') is False
+          print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW', duration)
+          PY
+
+          cp "$VIDEO_FILE" "$PROV_FILE" .kaggle-review/
+
+      - name: Upload generated candidate for manual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-clone-first-gate-review
+          path: .kaggle-review/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Export-only workflow: no model execution and no new Kaggle render submission.'
+          echo 'Only generated MP4 and provenance are uploaded; raw/private biometric sources remain outside GitHub.'
+          echo 'No auto-promotion; stable release remains unchanged.'
