@@ -52,8 +52,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .kaggle-export .kaggle-review
-          mkdir -p .kaggle-export .kaggle-review
+          rm -rf .kaggle-export kaggle-review
+          mkdir -p .kaggle-export kaggle-review
 
           python - <<'PY'
           import os
@@ -99,13 +99,13 @@ jobs:
           print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW', duration)
           PY
 
-          cp "$VIDEO_FILE" "$PROV_FILE" .kaggle-review/
+          cp "$VIDEO_FILE" "$PROV_FILE" kaggle-review/
 
       - name: Upload generated candidate for manual review
         uses: actions/upload-artifact@v4
         with:
           name: master-clone-first-gate-review
-          path: .kaggle-review/
+          path: kaggle-review/
           if-no-files-found: error
           retention-days: 7
 
