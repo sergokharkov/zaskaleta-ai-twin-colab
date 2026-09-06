@@ -1,0 +1,98 @@
+name: Kaggle MASTER CLONE Autopilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'kaggle/**'
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/generate_scene_speech.py'
+      - 'worker/voice_mms_openvoice.py'
+      - 'content/clone_quality_gate_v1.json'
+      - 'content/clone_release_policy_v1.json'
+      - 'content/clone_duration_gate_policy_v1.json'
+      - '.github/workflows/kaggle-autopilot.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-master-clone-autopilot
+  cancel-in-progress: true
+
+jobs:
+  submit-kaggle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL_SLUG: ${{ secrets.KAGGLE_KERNEL_SLUG }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate required Kaggle secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${KAGGLE_USERNAME:-}" || { echo 'Missing KAGGLE_USERNAME secret'; exit 2; }
+          test -n "${KAGGLE_KEY:-}" || { echo 'Missing KAGGLE_KEY secret'; exit 2; }
+          test -n "${KAGGLE_KERNEL_SLUG:-}" || { echo 'Missing KAGGLE_KERNEL_SLUG secret'; exit 2; }
+          case "$KAGGLE_KERNEL_SLUG" in
+            *[!a-z0-9-]*|'') echo 'KAGGLE_KERNEL_SLUG must contain only a-z, 0-9 and -'; exit 2 ;;
+          esac
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --disable-pip-version-check --quiet kaggle
+
+      - name: Build private Kaggle kernel package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .kaggle-autopilot
+          mkdir -p .kaggle-autopilot
+          cp kaggle/autopilot_kernel.py .kaggle-autopilot/autopilot_kernel.py
+
+          python - <<'PY'
+          import json, os, pathlib
+          username = os.environ['KAGGLE_USERNAME']
+          slug = os.environ['KAGGLE_KERNEL_SLUG']
+          private_dataset = os.environ.get('KAGGLE_PRIVATE_DATASET', '').strip()
+          meta = {
+              'id': f'{username}/{slug}',
+              'title': 'Zaskaleta MASTER CLONE Autopilot',
+              'code_file': 'autopilot_kernel.py',
+              'language': 'python',
+              'kernel_type': 'script',
+              'is_private': True,
+              'enable_gpu': True,
+              'enable_internet': True,
+              'dataset_sources': [private_dataset] if private_dataset else [],
+              'competition_sources': [],
+              'kernel_sources': [],
+          }
+          pathlib.Path('.kaggle-autopilot/kernel-metadata.json').write_text(
+              json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          PY
+
+      - name: Submit or update private Kaggle kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          kaggle kernels push -p .kaggle-autopilot
+          echo "Submitted private Kaggle kernel ${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+
+      - name: Safety summary
+        run: |
+          echo 'Kaggle submission is private.'
+          echo 'No biometric file is uploaded to GitHub by this workflow.'
+          echo 'No paid GPU is provisioned.'
+          echo 'No clone is auto-promoted.'
+          echo 'Kernel stops before render until private assets pass a dedicated validator.'
