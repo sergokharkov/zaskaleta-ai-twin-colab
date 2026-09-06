@@ -6,7 +6,7 @@ import soundfile as sf
 import torch
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer, VitsModel
-from openvoice.api import ToneColorConverter
+from openvoice.api import OpenVoiceBaseClass, ToneColorConverter
 
 
 def normalize_reference(src: pathlib.Path, dest: pathlib.Path):
@@ -31,17 +31,28 @@ def synthesize_ukrainian(text: str, output_path: pathlib.Path, device: str):
     sf.write(output_path, waveform, model.config.sampling_rate)
 
 
+def build_converter_without_watermark(config_path: pathlib.Path, device: str) -> ToneColorConverter:
+    """Initialize current OpenVoice V2 safely without triggering its broken kwargs path.
+
+    Upstream ToneColorConverter.__init__ forwards enable_watermark to
+    OpenVoiceBaseClass.__init__, which does not accept that keyword. Calling the
+    base initializer directly keeps the official converter model/state while
+    deliberately disabling watermarking for this private MASTER CLONE test.
+    """
+    converter = ToneColorConverter.__new__(ToneColorConverter)
+    OpenVoiceBaseClass.__init__(converter, str(config_path), device=device)
+    converter.watermark_model = None
+    converter.version = getattr(converter.hps, "_version_", "v1")
+    return converter
+
+
 def clone_tone(base_audio: pathlib.Path, reference_audio: pathlib.Path, output_path: pathlib.Path, device: str):
     repo = snapshot_download(
         repo_id="myshell-ai/OpenVoiceV2",
         allow_patterns=["converter/*"],
     )
     converter_dir = pathlib.Path(repo) / "converter"
-    converter = ToneColorConverter(
-        str(converter_dir / "config.json"),
-        device=device,
-        enable_watermark=False,
-    )
+    converter = build_converter_without_watermark(converter_dir / "config.json", device)
     converter.load_ckpt(str(converter_dir / "checkpoint.pth"))
     src_se = converter.extract_se(str(base_audio))
     tgt_se = converter.extract_se(str(reference_audio))
