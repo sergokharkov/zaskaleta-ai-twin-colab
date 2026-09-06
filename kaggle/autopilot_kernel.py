@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Kaggle autopilot entrypoint for MASTER CLONE.
 
-This script is designed to be submitted as a private Kaggle kernel by CI.
-It prepares the environment and public model weights automatically, validates
-mounted private MASTER CLONE assets fail-closed, and stops before render until
-an explicit render stage is available and all gates are satisfied.
+Prepares the environment and public model weights, validates mounted private
+MASTER CLONE assets fail-closed, then renders only the first 8–15 second
+candidate gate. It never auto-promotes or overwrites a stable clone.
 
 Safety invariants:
 - no raw biometric media is uploaded to GitHub
 - no auto-promotion
 - no paid GPU provisioning
 - no render starts without validated private assets
+- first render remains a quarantined candidate pending manual review
 """
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ REPO_URL = "https://github.com/sergokharkov/zaskaleta-ai-twin-colab.git"
 PY = WORK / "clone311" / "bin" / "python"
 STATUS = WORK / "zaskaleta_autopilot_status.json"
 PRIVATE_MANIFEST = WORK / "private_asset_manifest.json"
+FIRST_GATE_DIR = WORK / "first_gate"
+FIRST_GATE_EVIDENCE = FIRST_GATE_DIR / "MASTER_CLONE_GATE_08_15.evidence.json"
 PREFERRED_PRIVATE_ROOT = Path(os.environ.get("ZASKALETA_PRIVATE_ASSET_ROOT", "/kaggle/input/zaskaleta-master-clone-private"))
 RUNTIME_PRIVATE_ROOT = WORK / "_runtime_private_assets"
 REQUIRED_MARKERS = {
@@ -39,7 +41,7 @@ REQUIRED_MARKERS = {
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 7200) -> None:
-    print("$", " ".join(str(x) for x in cmd))
+    print("$", " ".join(str(x) for x in cmd), flush=True)
     subprocess.run([str(x) for x in cmd], cwd=str(cwd) if cwd else None, check=True, timeout=timeout)
 
 
@@ -90,13 +92,14 @@ def resolve_private_root() -> tuple[Path | None, str]:
 
 def write_status(private_root: Path | None = None, **extra) -> None:
     payload = {
-        "schema": "zaskaleta-kaggle-autopilot-status-v3",
+        "schema": "zaskaleta-kaggle-autopilot-status-v4",
         "repo": str(REPO),
         "private_asset_root": str(private_root) if private_root else None,
         "mounted_input_dirs": mounted_input_dirs(),
         "auto_promote": False,
         "paid_gpu_provisioned": False,
         "raw_biometrics_written_to_github": False,
+        "stable_release_modified": False,
         **extra,
     }
     STATUS.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -115,6 +118,7 @@ def ensure_repo() -> None:
 
 def main() -> int:
     private_root: Path | None = None
+    render_attempted = False
     try:
         ensure_repo()
         bootstrap = REPO / "kaggle" / "auto_prepare.py"
@@ -162,6 +166,29 @@ def main() -> int:
         if manifest.get("auto_promote") is not False or manifest.get("render_started") is not False:
             raise RuntimeError("private asset validator safety contract weakened")
 
+        gate_renderer = REPO / "kaggle" / "first_gate_render.py"
+        if not gate_renderer.is_file():
+            raise RuntimeError(f"Missing first gate renderer: {gate_renderer}")
+
+        render_attempted = True
+        run([
+            str(PY), str(gate_renderer),
+            "--root", str(private_root),
+            "--repo", str(REPO),
+            "--python", str(PY),
+            "--output-dir", str(FIRST_GATE_DIR),
+        ], cwd=REPO, timeout=7200)
+
+        if not FIRST_GATE_EVIDENCE.is_file():
+            raise RuntimeError("first gate evidence file missing after renderer success")
+        evidence = json.loads(FIRST_GATE_EVIDENCE.read_text(encoding="utf-8"))
+        if evidence.get("technical_gate_pass") is not True:
+            raise RuntimeError("first gate technical evidence did not pass")
+        if evidence.get("promotion_allowed") is not False or evidence.get("auto_promote") is not False:
+            raise RuntimeError("first gate promotion safety contract weakened")
+        if evidence.get("subjective_identity_review") != "PENDING_MANUAL_REVIEW":
+            raise RuntimeError("first gate unexpectedly bypassed manual identity review")
+
         write_status(
             private_root=private_root,
             automatic_prepare_complete=True,
@@ -172,9 +199,15 @@ def main() -> int:
             private_asset_discovery_mode=discovery_mode,
             private_asset_identity_count=manifest.get("identity_count"),
             private_asset_approved_motion_count=manifest.get("approved_motion_count"),
-            render_started=False,
+            render_started=True,
+            render_completed=True,
             first_gate_seconds=[8, 15],
-            state="READY_FOR_FIRST_GATE_RENDER",
+            first_gate_render_duration_seconds=evidence.get("render_duration_seconds"),
+            first_gate_candidate_id=evidence.get("candidate_id"),
+            first_gate_output_dir=str(FIRST_GATE_DIR),
+            subjective_identity_review="PENDING_MANUAL_REVIEW",
+            promotion_allowed=False,
+            state="FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW",
         )
         return 0
     except Exception as exc:
@@ -182,7 +215,9 @@ def main() -> int:
             private_root=private_root,
             automatic_prepare_complete=False,
             private_assets_validated=False,
-            render_started=False,
+            render_started=render_attempted,
+            render_completed=False,
+            promotion_allowed=False,
             state="FAILED_CLOSED",
             error_type=type(exc).__name__,
             error=str(exc),
