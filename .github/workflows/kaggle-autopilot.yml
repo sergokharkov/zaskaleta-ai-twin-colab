@@ -74,8 +74,6 @@ jobs:
         run: |
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
-          # Kaggle output API rate-limits aggressively after a kernel finishes.
-          # One request every 2 minutes stays well below the previous burst rate.
           for attempt in $(seq 1 25); do
             status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"; echo "$status_out"
             if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then exit 1; fi
@@ -89,28 +87,30 @@ jobs:
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
           rm -rf .kaggle-export && mkdir -p .kaggle-export
-          # Single output request avoids the 429 loop seen in run 16.
           kaggle kernels output "$KERNEL" -p .kaggle-export -q
           STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
-          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
-          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
-          test -n "$STATUS_FILE" && test -n "$VIDEO_FILE" && test -n "$PROV_FILE"
+          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15_CANDIDATE_002.mp4' -print -quit)"
+          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15_CANDIDATE_002.provenance.json' -print -quit)"
+          EVIDENCE_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15_CANDIDATE_002.evidence.json' -print -quit)"
+          test -n "$STATUS_FILE" && test -n "$VIDEO_FILE" && test -n "$PROV_FILE" && test -n "$EVIDENCE_FILE"
           python - "$STATUS_FILE" <<'PY'
           import json,sys
           d=json.load(open(sys.argv[1]))
-          assert d.get('state')=='FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW'
+          assert d.get('state')=='FIRST_GATE_CANDIDATE_002_READY_FOR_MANUAL_REVIEW'
           assert d.get('render_completed') is True
           assert 8 <= d.get('first_gate_render_duration_seconds',0) <= 15
+          assert d.get('first_gate_candidate_id')=='MASTER_CLONE_GATE_08_15_CANDIDATE_002'
+          assert d.get('single_component_change')=='approved_motion_reference'
           assert d.get('promotion_allowed') is False and d.get('auto_promote') is False
           assert d.get('stable_release_modified') is False
-          print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW', d['first_gate_render_duration_seconds'])
+          print(d['state'], d['first_gate_render_duration_seconds'])
           PY
           mkdir -p .kaggle-review
-          cp "$VIDEO_FILE" "$PROV_FILE" .kaggle-review/
+          cp "$VIDEO_FILE" "$PROV_FILE" "$EVIDENCE_FILE" .kaggle-review/
       - name: Upload generated candidate for manual review
         uses: actions/upload-artifact@v4
         with:
-          name: master-clone-first-gate-review
+          name: master-clone-first-gate-candidate-002-review
           path: .kaggle-review/
           if-no-files-found: error
           retention-days: 7
