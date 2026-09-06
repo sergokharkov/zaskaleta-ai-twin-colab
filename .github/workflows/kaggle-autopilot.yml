@@ -32,188 +32,81 @@ jobs:
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Validate required Kaggle secrets
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${KAGGLE_API_TOKEN:-}" || { echo 'Missing KAGGLE_API_TOKEN secret'; exit 2; }
-          test -n "${KAGGLE_USERNAME:-}" || { echo 'Missing KAGGLE_USERNAME secret'; exit 2; }
-          test -n "${KAGGLE_KERNEL_SLUG:-}" || { echo 'Missing KAGGLE_KERNEL_SLUG secret'; exit 2; }
-          test -n "${KAGGLE_PRIVATE_DATASET:-}" || { echo 'Missing KAGGLE_PRIVATE_DATASET secret'; exit 2; }
-          case "$KAGGLE_KERNEL_SLUG" in
-            *[!a-z0-9-]*|'') echo 'KAGGLE_KERNEL_SLUG must contain only a-z, 0-9 and -'; exit 2 ;;
-          esac
-          case "$KAGGLE_PRIVATE_DATASET" in
-            */*) ;;
-            *) echo 'KAGGLE_PRIVATE_DATASET must be owner/dataset-slug'; exit 2 ;;
-          esac
-
+          test -n "${KAGGLE_API_TOKEN:-}" || exit 2
+          test -n "${KAGGLE_USERNAME:-}" || exit 2
+          test -n "${KAGGLE_KERNEL_SLUG:-}" || exit 2
+          test -n "${KAGGLE_PRIVATE_DATASET:-}" || exit 2
       - name: Install Kaggle CLI
         run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0'
-
       - name: Verify Kaggle authentication
-        shell: bash
-        run: |
-          set -euo pipefail
-          kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
-          echo 'Kaggle API authentication succeeded.'
-
+        run: kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
       - name: Build private Kaggle kernel package
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .kaggle-autopilot
-          mkdir -p .kaggle-autopilot
+          rm -rf .kaggle-autopilot && mkdir -p .kaggle-autopilot
           cp kaggle/autopilot_kernel.py .kaggle-autopilot/autopilot_kernel.py
-
           python - <<'PY'
           import json, os, pathlib
-          username = os.environ['KAGGLE_USERNAME']
-          slug = os.environ['KAGGLE_KERNEL_SLUG']
-          private_dataset = os.environ['KAGGLE_PRIVATE_DATASET'].strip()
-          meta = {
-              'id': f'{username}/{slug}',
-              'title': 'Zaskaleta MASTER CLONE Autopilot',
-              'code_file': 'autopilot_kernel.py',
-              'language': 'python',
-              'kernel_type': 'script',
-              'is_private': True,
-              'enable_gpu': True,
-              'enable_internet': True,
-              'dataset_sources': [private_dataset],
-              'competition_sources': [],
-              'kernel_sources': [],
-          }
-          pathlib.Path('.kaggle-autopilot/kernel-metadata.json').write_text(
-              json.dumps(meta, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
-          )
+          meta={'id':f"{os.environ['KAGGLE_USERNAME']}/{os.environ['KAGGLE_KERNEL_SLUG']}",'title':'Zaskaleta MASTER CLONE Autopilot','code_file':'autopilot_kernel.py','language':'python','kernel_type':'script','is_private':True,'enable_gpu':True,'enable_internet':True,'dataset_sources':[os.environ['KAGGLE_PRIVATE_DATASET'].strip()],'competition_sources':[],'kernel_sources':[]}
+          pathlib.Path('.kaggle-autopilot/kernel-metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
           PY
-
       - name: Submit and automatically run private Kaggle kernel
-        shell: bash
-        run: |
-          set -euo pipefail
-          kaggle kernels push -p .kaggle-autopilot --timeout 7200 --accelerator gpu
-          echo "Submitted and started ${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
-
+        run: kaggle kernels push -p .kaggle-autopilot --timeout 7200 --accelerator gpu
       - name: Follow Kaggle render logs
         shell: bash
         run: |
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
-          echo "Following Kaggle logs for ${KERNEL}"
           timeout 6600 kaggle kernels logs "$KERNEL" --follow --interval 15 || rc=$?
-          rc=${rc:-0}
-          if [ "$rc" -eq 124 ]; then
-            echo 'Timed out waiting for Kaggle kernel logs after 110 minutes.'
-            exit 1
-          fi
-
-          # Kaggle can keep reporting RUNNING long after the script has finished and
-          # emitted a valid first-gate result. Do not fail CI solely on that stale
-          # wrapper status. Explicit ERROR/CANCEL/FAILED still fails immediately.
-          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
-          echo "$status_out"
-          if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then
-            echo 'Kaggle kernel finished unsuccessfully.'
-            exit 1
-          fi
-          echo 'Render log stream ended; validating published output directly.'
-
-      - name: Read safe autopilot status only
+          rc=${rc:-0}; [ "$rc" -ne 124 ] || exit 1
+          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"; echo "$status_out"
+          ! echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'
+      - name: Wait for Kaggle output publication
         shell: bash
         run: |
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
-          rm -rf .kaggle-status
-          mkdir -p .kaggle-status
-
-          STATUS_FILE=''
-          # Output publication may lag behind the script by several minutes. Poll
-          # the exact safe status file for up to 30 minutes instead of trusting the
-          # stale KernelWorkerStatus.RUNNING wrapper.
-          for attempt in $(seq 1 90); do
-            rm -rf .kaggle-status/*
-            kaggle kernels output "$KERNEL" \
-              -p .kaggle-status \
-              --file-pattern '(^|/)zaskaleta_autopilot_status\.json$' \
-              -q || true
-            STATUS_FILE="$(find .kaggle-status -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
-            if [ -n "$STATUS_FILE" ]; then
-              break
-            fi
-            if (( attempt % 6 == 0 )); then
-              echo "Status JSON not published yet (attempt ${attempt}/90)."
-            fi
-            sleep 20
+          # Kaggle output API rate-limits aggressively after a kernel finishes.
+          # One request every 2 minutes stays well below the previous burst rate.
+          for attempt in $(seq 1 25); do
+            status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"; echo "$status_out"
+            if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then exit 1; fi
+            if echo "$status_out" | grep -Eq 'COMPLETE|SUCCESS'; then exit 0; fi
+            sleep 120
           done
-          test -n "$STATUS_FILE" || { echo 'Autopilot status JSON was not produced.'; exit 1; }
-
+          echo 'Kaggle terminal status still stale; attempting one output read.'
+      - name: Download safe status and generated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+          rm -rf .kaggle-export && mkdir -p .kaggle-export
+          # Single output request avoids the 429 loop seen in run 16.
+          kaggle kernels output "$KERNEL" -p .kaggle-export -q
+          STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
+          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
+          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
+          test -n "$STATUS_FILE" && test -n "$VIDEO_FILE" && test -n "$PROV_FILE"
           python - "$STATUS_FILE" <<'PY'
-          import json, pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          data = json.loads(p.read_text(encoding='utf-8'))
-          safe = {
-              'schema': data.get('schema'),
-              'state': data.get('state'),
-              'render_started': data.get('render_started'),
-              'render_completed': data.get('render_completed'),
-              'first_gate_render_duration_seconds': data.get('first_gate_render_duration_seconds'),
-              'subjective_identity_review': data.get('subjective_identity_review'),
-              'promotion_allowed': data.get('promotion_allowed'),
-              'auto_promote': data.get('auto_promote'),
-              'stable_release_modified': data.get('stable_release_modified'),
-          }
-          print(json.dumps(safe, ensure_ascii=False, indent=2))
-          state = data.get('state')
-          if state != 'FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW':
-              raise SystemExit(f'Unexpected/failing autopilot state: {state}')
-          if data.get('render_completed') is not True:
-              raise SystemExit('First gate render did not complete')
-          duration = data.get('first_gate_render_duration_seconds')
-          if not isinstance(duration, (int, float)) or not (8 <= duration <= 15):
-              raise SystemExit(f'First gate duration outside 8-15 seconds: {duration}')
-          if data.get('promotion_allowed') is not False or data.get('auto_promote') is not False:
-              raise SystemExit('Promotion safety contract was weakened')
-          if data.get('stable_release_modified') is not False:
-              raise SystemExit('Stable release was unexpectedly modified')
-          print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW confirmed.')
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d.get('state')=='FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW'
+          assert d.get('render_completed') is True
+          assert 8 <= d.get('first_gate_render_duration_seconds',0) <= 15
+          assert d.get('promotion_allowed') is False and d.get('auto_promote') is False
+          assert d.get('stable_release_modified') is False
+          print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW', d['first_gate_render_duration_seconds'])
           PY
-
-      - name: Download generated review candidate only
-        shell: bash
-        run: |
-          set -euo pipefail
-          KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
-          rm -rf .kaggle-review
           mkdir -p .kaggle-review
-
-          for attempt in $(seq 1 90); do
-            rm -rf .kaggle-review/*
-            kaggle kernels output "$KERNEL" \
-              -p .kaggle-review \
-              --file-pattern '(^|/)MASTER_CLONE_GATE_08_15\.mp4$|(^|/)MASTER_CLONE_GATE_08_15\.provenance\.json$' \
-              -q || true
-            VIDEO_FILE="$(find .kaggle-review -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
-            PROV_FILE="$(find .kaggle-review -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
-            if [ -n "$VIDEO_FILE" ] && [ -n "$PROV_FILE" ]; then
-              break
-            fi
-            if (( attempt % 6 == 0 )); then
-              echo "Review candidate not published yet (attempt ${attempt}/90)."
-            fi
-            sleep 20
-          done
-
-          test -n "${VIDEO_FILE:-}" || { echo 'Generated review video was not published.'; exit 1; }
-          test -n "${PROV_FILE:-}" || { echo 'Generated provenance file was not published.'; exit 1; }
-          echo "Generated review candidate ready: $(basename "$VIDEO_FILE")"
-
+          cp "$VIDEO_FILE" "$PROV_FILE" .kaggle-review/
       - name: Upload generated candidate for manual review
         uses: actions/upload-artifact@v4
         with:
@@ -221,14 +114,8 @@ jobs:
           path: .kaggle-review/
           if-no-files-found: error
           retention-days: 7
-
       - name: Safety summary
         if: always()
         run: |
-          echo 'Kaggle kernel is private.'
           echo 'Raw/private biometric source assets are never uploaded to GitHub.'
-          echo 'Only the generated 8-15s candidate and its provenance are exported as a temporary review artifact.'
-          echo 'No paid GPU is provisioned by this workflow.'
-          echo 'No clone is auto-promoted.'
-          echo 'Stable release remains immutable.'
-          echo 'The candidate remains quarantined pending manual visual identity review.'
+          echo 'No paid GPU is provisioned; no clone is auto-promoted; stable release remains immutable.'
