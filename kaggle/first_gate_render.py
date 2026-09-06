@@ -67,7 +67,11 @@ def main() -> int:
 
     private_root = Path(args.root).resolve()
     repo = Path(args.repo).resolve()
-    py = Path(args.python).resolve()
+    # Preserve the venv launcher path. Path.resolve() follows clone311/bin/python's
+    # symlink to uv's base interpreter and drops the venv site-packages context.
+    py = Path(args.python)
+    if not py.is_file():
+        raise RuntimeError(f"requested worker Python does not exist: {py}")
     out = Path(args.output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
