@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
       KAGGLE_KERNEL_SLUG: ${{ secrets.KAGGLE_KERNEL_SLUG }}
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
     steps:
@@ -41,15 +41,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${KAGGLE_API_TOKEN:-}" || { echo 'Missing KAGGLE_API_TOKEN secret'; exit 2; }
           test -n "${KAGGLE_USERNAME:-}" || { echo 'Missing KAGGLE_USERNAME secret'; exit 2; }
-          test -n "${KAGGLE_KEY:-}" || { echo 'Missing KAGGLE_KEY secret'; exit 2; }
           test -n "${KAGGLE_KERNEL_SLUG:-}" || { echo 'Missing KAGGLE_KERNEL_SLUG secret'; exit 2; }
+          test -n "${KAGGLE_PRIVATE_DATASET:-}" || { echo 'Missing KAGGLE_PRIVATE_DATASET secret'; exit 2; }
           case "$KAGGLE_KERNEL_SLUG" in
             *[!a-z0-9-]*|'') echo 'KAGGLE_KERNEL_SLUG must contain only a-z, 0-9 and -'; exit 2 ;;
           esac
+          case "$KAGGLE_PRIVATE_DATASET" in
+            */*) ;;
+            *) echo 'KAGGLE_PRIVATE_DATASET must be owner/dataset-slug'; exit 2 ;;
+          esac
 
       - name: Install Kaggle CLI
-        run: python -m pip install --disable-pip-version-check --quiet kaggle
+        run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0'
+
+      - name: Verify Kaggle authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
+          echo 'Kaggle API authentication succeeded.'
 
       - name: Build private Kaggle kernel package
         shell: bash
@@ -63,7 +75,7 @@ jobs:
           import json, os, pathlib
           username = os.environ['KAGGLE_USERNAME']
           slug = os.environ['KAGGLE_KERNEL_SLUG']
-          private_dataset = os.environ.get('KAGGLE_PRIVATE_DATASET', '').strip()
+          private_dataset = os.environ['KAGGLE_PRIVATE_DATASET'].strip()
           meta = {
               'id': f'{username}/{slug}',
               'title': 'Zaskaleta MASTER CLONE Autopilot',
@@ -73,7 +85,7 @@ jobs:
               'is_private': True,
               'enable_gpu': True,
               'enable_internet': True,
-              'dataset_sources': [private_dataset] if private_dataset else [],
+              'dataset_sources': [private_dataset],
               'competition_sources': [],
               'kernel_sources': [],
           }
