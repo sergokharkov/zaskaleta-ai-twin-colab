@@ -46,6 +46,19 @@ def copy_local(src: pathlib.Path, dst_dir: pathlib.Path, stem: str):
     return dst
 
 
+def resolve_musetalk_root() -> pathlib.Path:
+    explicit = os.environ.get('MUSETALK_ROOT', '').strip()
+    if explicit:
+        return pathlib.Path(explicit).resolve()
+    kaggle = pathlib.Path('/kaggle/working/MuseTalk')
+    if (kaggle / 'scripts' / 'inference.py').is_file():
+        return kaggle.resolve()
+    colab = pathlib.Path('/content/MuseTalk')
+    if (colab / 'scripts' / 'inference.py').is_file():
+        return colab.resolve()
+    return kaggle.resolve() if pathlib.Path('/kaggle/working').is_dir() else colab.resolve()
+
+
 def runtime_temp_parent() -> pathlib.Path:
     explicit = os.environ.get('ZASKALETA_TMP_ROOT', '').strip()
     if explicit:
@@ -99,7 +112,7 @@ def main():
     )
     args = parser.parse_args()
 
-    root = pathlib.Path(os.environ.get('MUSETALK_ROOT', '/content/MuseTalk')).resolve()
+    root = resolve_musetalk_root()
     if not (root / 'scripts' / 'inference.py').exists():
         raise SystemExit(f'MuseTalk not found at {root}')
 
