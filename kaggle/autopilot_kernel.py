@@ -2,8 +2,9 @@
 """Kaggle autopilot entrypoint for MASTER CLONE.
 
 This script is designed to be submitted as a private Kaggle kernel by CI.
-It prepares the environment and public model weights automatically, then
-stops safely unless a private asset mount is already present.
+It prepares the environment and public model weights automatically, validates
+mounted private MASTER CLONE assets fail-closed, and stops before render until
+an explicit render stage is available and all gates are satisfied.
 
 Safety invariants:
 - no raw biometric media is uploaded to GitHub
@@ -25,6 +26,7 @@ REPO = WORK / "zaskaleta-ai-twin-colab"
 REPO_URL = "https://github.com/sergokharkov/zaskaleta-ai-twin-colab.git"
 PY = WORK / "clone311" / "bin" / "python"
 STATUS = WORK / "zaskaleta_autopilot_status.json"
+PRIVATE_MANIFEST = WORK / "private_asset_manifest.json"
 PRIVATE_ROOT = Path(os.environ.get("ZASKALETA_PRIVATE_ASSET_ROOT", "/kaggle/input/zaskaleta-master-clone-private"))
 
 
@@ -35,7 +37,7 @@ def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 7200) -> None
 
 def write_status(**extra) -> None:
     payload = {
-        "schema": "zaskaleta-kaggle-autopilot-status-v1",
+        "schema": "zaskaleta-kaggle-autopilot-status-v2",
         "repo": str(REPO),
         "private_asset_root": str(PRIVATE_ROOT),
         "auto_promote": False,
@@ -70,36 +72,58 @@ def main() -> int:
         if not PY.is_file():
             raise RuntimeError("clone311 Python missing after auto_prepare")
 
-        # Re-run only the final model verification and preflight in the pinned env.
+        # Re-run final model verification and preflight in the pinned env.
         run([str(PY), str(REPO / "kaggle" / "prepare_models.py"), "--verify-only"], cwd=REPO)
         run([str(PY), str(REPO / "kaggle" / "preflight.py")], cwd=REPO)
 
-        private_present = PRIVATE_ROOT.is_dir() and any(PRIVATE_ROOT.rglob("*"))
+        private_present = PRIVATE_ROOT.is_dir() and any(p.is_file() for p in PRIVATE_ROOT.rglob("*"))
         if not private_present:
             write_status(
                 automatic_prepare_complete=True,
                 public_models_verified=True,
                 preflight_passed=True,
                 private_assets_present=False,
+                private_assets_validated=False,
                 render_started=False,
                 state="WAITING_FOR_PRIVATE_ASSETS",
             )
             return 0
 
-        # Private assets are intentionally not rendered here yet. The next stage
-        # must validate exact canonical identity/voice/motion filenames + hashes.
+        validator = REPO / "kaggle" / "validate_private_assets.py"
+        if not validator.is_file():
+            raise RuntimeError(f"Missing private asset validator: {validator}")
+
+        run([
+            str(PY), str(validator),
+            "--root", str(PRIVATE_ROOT),
+            "--profile", str(REPO / "content" / "clone_reference_profile.json"),
+            "--package", str(REPO / "content" / "master_clone_package.json"),
+            "--output", str(PRIVATE_MANIFEST),
+        ], cwd=REPO, timeout=3600)
+
+        manifest = json.loads(PRIVATE_MANIFEST.read_text(encoding="utf-8"))
+        if manifest.get("validated") is not True:
+            raise RuntimeError("private asset manifest did not validate")
+        if manifest.get("auto_promote") is not False or manifest.get("render_started") is not False:
+            raise RuntimeError("private asset validator safety contract weakened")
+
         write_status(
             automatic_prepare_complete=True,
             public_models_verified=True,
             preflight_passed=True,
             private_assets_present=True,
+            private_assets_validated=True,
+            private_asset_identity_count=manifest.get("identity_count"),
+            private_asset_approved_motion_count=manifest.get("approved_motion_count"),
             render_started=False,
-            state="PRIVATE_ASSETS_PRESENT_VALIDATION_REQUIRED",
+            first_gate_seconds=[8, 15],
+            state="READY_FOR_FIRST_GATE_RENDER",
         )
         return 0
     except Exception as exc:
         write_status(
             automatic_prepare_complete=False,
+            private_assets_validated=False,
             render_started=False,
             state="FAILED_CLOSED",
             error_type=type(exc).__name__,
