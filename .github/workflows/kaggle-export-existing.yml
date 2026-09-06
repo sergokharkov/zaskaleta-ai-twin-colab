@@ -35,35 +35,48 @@ jobs:
           test -n "${KAGGLE_USERNAME:-}" || exit 2
           test -n "${KAGGLE_KERNEL_SLUG:-}" || exit 2
 
-      - name: Install Kaggle CLI
-        run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0'
+      - name: Install Kaggle clients
+        run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0' 'kagglehub>=0.3.13'
 
-      - name: Verify Kaggle authentication
-        run: kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
-
-      - name: Download existing safe MASTER CLONE output only
+      - name: Verify Kaggle authentication and completed kernel
         shell: bash
         run: |
           set -euo pipefail
+          kaggle datasets list -m --sort-by updated --max-size 1 >/dev/null
           KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
+          echo "$status_out"
+          echo "$status_out" | grep -q 'COMPLETE'
+
+      - name: Download existing safe MASTER CLONE review files only
+        shell: bash
+        run: |
+          set -euo pipefail
           rm -rf .kaggle-export .kaggle-review
           mkdir -p .kaggle-export .kaggle-review
 
-          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
-          echo "$status_out"
-          if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then
-            echo 'Kaggle kernel is not in a usable terminal state.' >&2
-            exit 1
-          fi
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import kagglehub
 
-          for file in \
-            zaskaleta_autopilot_status.json \
-            MASTER_CLONE_GATE_08_15.mp4 \
-            MASTER_CLONE_GATE_08_15.provenance.json
-          do
-            echo "Downloading $file"
-            timeout 300 kaggle kernels output "$KERNEL" -p .kaggle-export -f "$file" -q
-          done
+          handle = f"{os.environ['KAGGLE_USERNAME']}/{os.environ['KAGGLE_KERNEL_SLUG']}"
+          out = Path('.kaggle-export')
+          files = [
+              'zaskaleta_autopilot_status.json',
+              'MASTER_CLONE_GATE_08_15.mp4',
+              'MASTER_CLONE_GATE_08_15.provenance.json',
+          ]
+          for name in files:
+              print(f'Downloading {name}')
+              p = kagglehub.notebook_output_download(
+                  handle,
+                  path=name,
+                  output_dir=str(out),
+                  force_download=True,
+              )
+              print(p)
+          PY
 
           STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
           VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
