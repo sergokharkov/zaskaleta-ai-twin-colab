@@ -21,6 +21,7 @@ WORK = Path(os.environ.get("KAGGLE_WORKING", "/kaggle/working")).resolve()
 MUSETALK = Path(os.environ.get("MUSETALK_ROOT", WORK / "MuseTalk")).resolve()
 OPENVOICE = Path(os.environ.get("OPENVOICE_ROOT", WORK / "OpenVoice")).resolve()
 MODELS = MUSETALK / "models"
+FACE_PARSE_SHA256 = "468e13ca13a9b43cc0881a9f99083a430e9c0a38abd935431d1c28ee94b26567"
 
 
 def sha256_file(path: Path) -> str:
@@ -81,6 +82,35 @@ def verify_existing() -> tuple[list[dict], list[dict]]:
     return muse, voice
 
 
+def ensure_face_parse_checkpoint(face_parse: Path) -> None:
+    if face_parse.is_file() and face_parse.stat().st_size >= 1024 * 1024:
+        digest = sha256_file(face_parse)
+        if digest == FACE_PARSE_SHA256:
+            return
+        face_parse.unlink(missing_ok=True)
+
+    try:
+        try:
+            import gdown  # noqa: F401
+        except Exception:
+            run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
+        run([sys.executable, "-m", "gdown", "--id", "154JgKpzCPW82qINcVieuPH3fZ2e0P812", "-O", str(face_parse)])
+    except subprocess.CalledProcessError as exc:
+        print(f"Primary gdown source failed (exit={exc.returncode}); using verified Hugging Face mirror")
+        face_parse.unlink(missing_ok=True)
+        mirror = download_hf("ManyOtherFunctions/face-parse-bisent", "79999_iter.pth", face_parse.parent)
+        if mirror.resolve() != face_parse.resolve():
+            shutil.copy2(mirror, face_parse)
+
+    info = require_file(face_parse, min_bytes=1024 * 1024)
+    if info["sha256"] != FACE_PARSE_SHA256:
+        face_parse.unlink(missing_ok=True)
+        raise RuntimeError(
+            "Face parser checkpoint SHA-256 mismatch: "
+            f"expected {FACE_PARSE_SHA256}, got {info['sha256']}"
+        )
+
+
 def prepare_musetalk() -> list[dict]:
     if not (MUSETALK / "scripts" / "inference.py").is_file():
         raise RuntimeError(f"MuseTalk repository missing at {MUSETALK}")
@@ -103,12 +133,7 @@ def prepare_musetalk() -> list[dict]:
         run(["curl", "-fL", "https://download.pytorch.org/models/resnet18-5c106cde.pth", "-o", str(resnet)])
 
     face_parse = face_dir / "79999_iter.pth"
-    if not face_parse.is_file() or face_parse.stat().st_size < 1024 * 1024:
-        try:
-            import gdown  # noqa: F401
-        except Exception:
-            run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
-        run([sys.executable, "-m", "gdown", "--id", "154JgKpzCPW82qINcVieuPH3fZ2e0P812", "-O", str(face_parse)])
+    ensure_face_parse_checkpoint(face_parse)
 
     return [require_file(path, min_bytes=min_bytes) for path, min_bytes in expected_musetalk_paths()]
 
