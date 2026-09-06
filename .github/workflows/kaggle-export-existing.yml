@@ -48,7 +48,7 @@ jobs:
           echo "$status_out"
           echo "$status_out" | grep -q 'COMPLETE'
 
-      - name: Download existing safe MASTER CLONE review files only
+      - name: Download existing safe CANDIDATE_002 review files only
         shell: bash
         run: |
           set -euo pipefail
@@ -64,8 +64,8 @@ jobs:
           out = Path('.kaggle-export')
           files = [
               'zaskaleta_autopilot_status.json',
-              'first_gate/MASTER_CLONE_GATE_08_15.mp4',
-              'first_gate/MASTER_CLONE_GATE_08_15.provenance.json',
+              'first_gate_naturalness/MASTER_CLONE_GATE_08_15_CANDIDATE_002.mp4',
+              'first_gate_naturalness/MASTER_CLONE_GATE_08_15_CANDIDATE_002.provenance.json',
           ]
           for name in files:
               print(f'Downloading {name}')
@@ -79,8 +79,8 @@ jobs:
           PY
 
           STATUS_FILE="$(find .kaggle-export -type f -name 'zaskaleta_autopilot_status.json' -print -quit)"
-          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
-          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
+          VIDEO_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15_CANDIDATE_002.mp4' -print -quit)"
+          PROV_FILE="$(find .kaggle-export -type f -name 'MASTER_CLONE_GATE_08_15_CANDIDATE_002.provenance.json' -print -quit)"
 
           test -n "$STATUS_FILE"
           test -n "$VIDEO_FILE"
@@ -89,22 +89,24 @@ jobs:
           python - "$STATUS_FILE" <<'PY'
           import json, sys
           d = json.load(open(sys.argv[1]))
-          assert d.get('state') == 'FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW'
+          assert d.get('state') == 'FIRST_GATE_CANDIDATE_002_READY_FOR_MANUAL_REVIEW'
           assert d.get('render_completed') is True
+          assert d.get('first_gate_candidate_id') == 'MASTER_CLONE_GATE_08_15_CANDIDATE_002'
           duration = d.get('first_gate_render_duration_seconds', d.get('render_duration_seconds', 0))
           assert 8 <= duration <= 15
           assert d.get('promotion_allowed') is False
+          assert d.get('auto_promote') is False
           assert d.get('stable_release_modified') is False
           assert d.get('raw_biometrics_written_to_github') is False
-          print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW', duration)
+          print('FIRST_GATE_CANDIDATE_002_READY_FOR_MANUAL_REVIEW', duration)
           PY
 
           cp "$VIDEO_FILE" "$PROV_FILE" kaggle-review/
 
-      - name: Upload generated candidate for manual review
+      - name: Upload candidate 002 for manual review
         uses: actions/upload-artifact@v4
         with:
-          name: master-clone-first-gate-review
+          name: master-clone-first-gate-candidate-002-review
           path: kaggle-review/
           if-no-files-found: error
           retention-days: 7
