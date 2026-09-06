@@ -114,8 +114,6 @@ jobs:
             exit 1
           fi
 
-          # Kaggle log streaming can end a few seconds before server-side output is
-          # finalized. Poll the authoritative kernel status until it is terminal.
           deadline=$((SECONDS + 600))
           while :; do
             status_out="$(kaggle kernels status "$KERNEL" 2>&1)"
@@ -143,8 +141,6 @@ jobs:
           rm -rf .kaggle-status
           mkdir -p .kaggle-status
 
-          # Output publication can lag terminal status briefly. Retry only the small
-          # status JSON; never download render media or raw/private biometric assets.
           STATUS_FILE=''
           for attempt in $(seq 1 12); do
             rm -rf .kaggle-status/*
@@ -192,12 +188,48 @@ jobs:
           print('FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW confirmed.')
           PY
 
+      - name: Download generated review candidate only
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
+          rm -rf .kaggle-review
+          mkdir -p .kaggle-review
+
+          for attempt in $(seq 1 12); do
+            rm -rf .kaggle-review/*
+            kaggle kernels output "$KERNEL" \
+              -p .kaggle-review \
+              --file-pattern '(^|/)MASTER_CLONE_GATE_08_15\.mp4$|(^|/)MASTER_CLONE_GATE_08_15\.provenance\.json$' \
+              -q || true
+            VIDEO_FILE="$(find .kaggle-review -type f -name 'MASTER_CLONE_GATE_08_15.mp4' -print -quit)"
+            PROV_FILE="$(find .kaggle-review -type f -name 'MASTER_CLONE_GATE_08_15.provenance.json' -print -quit)"
+            if [ -n "$VIDEO_FILE" ] && [ -n "$PROV_FILE" ]; then
+              break
+            fi
+            echo "Review candidate not published yet (attempt ${attempt}/12); waiting 10s."
+            sleep 10
+          done
+
+          test -n "${VIDEO_FILE:-}" || { echo 'Generated review video was not published.'; exit 1; }
+          test -n "${PROV_FILE:-}" || { echo 'Generated provenance file was not published.'; exit 1; }
+          echo "Generated review candidate ready: $(basename "$VIDEO_FILE")"
+
+      - name: Upload generated candidate for manual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-clone-first-gate-review
+          path: .kaggle-review/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Safety summary
         if: always()
         run: |
           echo 'Kaggle kernel is private.'
-          echo 'GitHub never downloads render media or raw biometric assets.'
+          echo 'Raw/private biometric source assets are never uploaded to GitHub.'
+          echo 'Only the generated 8-15s candidate and its provenance are exported as a temporary review artifact.'
           echo 'No paid GPU is provisioned by this workflow.'
           echo 'No clone is auto-promoted.'
           echo 'Stable release remains immutable.'
-          echo 'The first 8-15s candidate remains quarantined pending manual visual identity review.'
+          echo 'The candidate remains quarantined pending manual visual identity review.'
