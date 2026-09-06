@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Kaggle autopilot entrypoint for MASTER CLONE.
+"""Kaggle autopilot entrypoint for MASTER CLONE first-gate challenger.
 
 Prepares the environment and public model weights, validates mounted private
-MASTER CLONE assets fail-closed, then renders only the first 8–15 second
-candidate gate. It never auto-promotes or overwrites a stable clone.
+MASTER CLONE assets fail-closed, then renders only the 8–15 second
+CANDIDATE_002 naturalness challenger. It never auto-promotes or overwrites a stable clone.
 
 Safety invariants:
 - no raw biometric media is uploaded to GitHub
 - no auto-promotion
 - no paid GPU provisioning
 - no render starts without validated private assets
-- first render remains a quarantined candidate pending manual review
+- challenger remains quarantined pending manual review
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ REPO_URL = "https://github.com/sergokharkov/zaskaleta-ai-twin-colab.git"
 PY = WORK / "clone311" / "bin" / "python"
 STATUS = WORK / "zaskaleta_autopilot_status.json"
 PRIVATE_MANIFEST = WORK / "private_asset_manifest.json"
-FIRST_GATE_DIR = WORK / "first_gate"
-FIRST_GATE_EVIDENCE = FIRST_GATE_DIR / "MASTER_CLONE_GATE_08_15.evidence.json"
+GATE_DIR = WORK / "first_gate_naturalness"
+GATE_EVIDENCE = GATE_DIR / "MASTER_CLONE_GATE_08_15_CANDIDATE_002.evidence.json"
 PREFERRED_PRIVATE_ROOT = Path(os.environ.get("ZASKALETA_PRIVATE_ASSET_ROOT", "/kaggle/input/zaskaleta-master-clone-private"))
 RUNTIME_PRIVATE_ROOT = WORK / "_runtime_private_assets"
 REQUIRED_MARKERS = {
@@ -92,7 +92,7 @@ def resolve_private_root() -> tuple[Path | None, str]:
 
 def write_status(private_root: Path | None = None, **extra) -> None:
     payload = {
-        "schema": "zaskaleta-kaggle-autopilot-status-v4",
+        "schema": "zaskaleta-kaggle-autopilot-status-v5",
         "repo": str(REPO),
         "private_asset_root": str(private_root) if private_root else None,
         "mounted_input_dirs": mounted_input_dirs(),
@@ -166,9 +166,9 @@ def main() -> int:
         if manifest.get("auto_promote") is not False or manifest.get("render_started") is not False:
             raise RuntimeError("private asset validator safety contract weakened")
 
-        gate_renderer = REPO / "kaggle" / "first_gate_render.py"
+        gate_renderer = REPO / "kaggle" / "first_gate_naturalness_render.py"
         if not gate_renderer.is_file():
-            raise RuntimeError(f"Missing first gate renderer: {gate_renderer}")
+            raise RuntimeError(f"Missing naturalness gate renderer: {gate_renderer}")
 
         render_attempted = True
         run([
@@ -176,18 +176,18 @@ def main() -> int:
             "--root", str(private_root),
             "--repo", str(REPO),
             "--python", str(PY),
-            "--output-dir", str(FIRST_GATE_DIR),
+            "--output-dir", str(GATE_DIR),
         ], cwd=REPO, timeout=7200)
 
-        if not FIRST_GATE_EVIDENCE.is_file():
-            raise RuntimeError("first gate evidence file missing after renderer success")
-        evidence = json.loads(FIRST_GATE_EVIDENCE.read_text(encoding="utf-8"))
+        if not GATE_EVIDENCE.is_file():
+            raise RuntimeError("candidate 002 evidence file missing after renderer success")
+        evidence = json.loads(GATE_EVIDENCE.read_text(encoding="utf-8"))
         if evidence.get("technical_gate_pass") is not True:
-            raise RuntimeError("first gate technical evidence did not pass")
+            raise RuntimeError("candidate 002 technical evidence did not pass")
         if evidence.get("promotion_allowed") is not False or evidence.get("auto_promote") is not False:
-            raise RuntimeError("first gate promotion safety contract weakened")
+            raise RuntimeError("candidate 002 promotion safety contract weakened")
         if evidence.get("subjective_identity_review") != "PENDING_MANUAL_REVIEW":
-            raise RuntimeError("first gate unexpectedly bypassed manual identity review")
+            raise RuntimeError("candidate 002 unexpectedly bypassed manual identity review")
 
         write_status(
             private_root=private_root,
@@ -204,10 +204,13 @@ def main() -> int:
             first_gate_seconds=[8, 15],
             first_gate_render_duration_seconds=evidence.get("render_duration_seconds"),
             first_gate_candidate_id=evidence.get("candidate_id"),
-            first_gate_output_dir=str(FIRST_GATE_DIR),
+            baseline_candidate_id=evidence.get("baseline_candidate_id"),
+            single_component_change=evidence.get("single_component_change"),
+            challenger_motion_reference=evidence.get("challenger_motion_reference"),
+            first_gate_output_dir=str(GATE_DIR),
             subjective_identity_review="PENDING_MANUAL_REVIEW",
             promotion_allowed=False,
-            state="FIRST_GATE_RENDER_READY_FOR_MANUAL_REVIEW",
+            state="FIRST_GATE_CANDIDATE_002_READY_FOR_MANUAL_REVIEW",
         )
         return 0
     except Exception as exc:
