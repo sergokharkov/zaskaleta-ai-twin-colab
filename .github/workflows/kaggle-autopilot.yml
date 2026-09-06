@@ -101,7 +101,7 @@ jobs:
           kaggle kernels push -p .kaggle-autopilot --timeout 7200 --accelerator gpu
           echo "Submitted and started ${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG}"
 
-      - name: Follow Kaggle run until completion
+      - name: Follow Kaggle render logs
         shell: bash
         run: |
           set -euo pipefail
@@ -114,24 +114,16 @@ jobs:
             exit 1
           fi
 
-          deadline=$((SECONDS + 600))
-          while :; do
-            status_out="$(kaggle kernels status "$KERNEL" 2>&1)"
-            echo "$status_out"
-            if echo "$status_out" | grep -Eq 'COMPLETE|SUCCESS|ERROR|CANCEL|FAILED'; then
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo 'Timed out waiting for Kaggle terminal status after log stream ended.'
-              exit 1
-            fi
-            sleep 10
-          done
-
+          # Kaggle can keep reporting RUNNING long after the script has finished and
+          # emitted a valid first-gate result. Do not fail CI solely on that stale
+          # wrapper status. Explicit ERROR/CANCEL/FAILED still fails immediately.
+          status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
+          echo "$status_out"
           if echo "$status_out" | grep -Eq 'ERROR|CANCEL|FAILED'; then
             echo 'Kaggle kernel finished unsuccessfully.'
             exit 1
           fi
+          echo 'Render log stream ended; validating published output directly.'
 
       - name: Read safe autopilot status only
         shell: bash
@@ -142,7 +134,10 @@ jobs:
           mkdir -p .kaggle-status
 
           STATUS_FILE=''
-          for attempt in $(seq 1 12); do
+          # Output publication may lag behind the script by several minutes. Poll
+          # the exact safe status file for up to 30 minutes instead of trusting the
+          # stale KernelWorkerStatus.RUNNING wrapper.
+          for attempt in $(seq 1 90); do
             rm -rf .kaggle-status/*
             kaggle kernels output "$KERNEL" \
               -p .kaggle-status \
@@ -152,8 +147,10 @@ jobs:
             if [ -n "$STATUS_FILE" ]; then
               break
             fi
-            echo "Status JSON not published yet (attempt ${attempt}/12); waiting 10s."
-            sleep 10
+            if (( attempt % 6 == 0 )); then
+              echo "Status JSON not published yet (attempt ${attempt}/90)."
+            fi
+            sleep 20
           done
           test -n "$STATUS_FILE" || { echo 'Autopilot status JSON was not produced.'; exit 1; }
 
@@ -196,7 +193,7 @@ jobs:
           rm -rf .kaggle-review
           mkdir -p .kaggle-review
 
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 90); do
             rm -rf .kaggle-review/*
             kaggle kernels output "$KERNEL" \
               -p .kaggle-review \
@@ -207,8 +204,10 @@ jobs:
             if [ -n "$VIDEO_FILE" ] && [ -n "$PROV_FILE" ]; then
               break
             fi
-            echo "Review candidate not published yet (attempt ${attempt}/12); waiting 10s."
-            sleep 10
+            if (( attempt % 6 == 0 )); then
+              echo "Review candidate not published yet (attempt ${attempt}/90)."
+            fi
+            sleep 20
           done
 
           test -n "${VIDEO_FILE:-}" || { echo 'Generated review video was not published.'; exit 1; }
