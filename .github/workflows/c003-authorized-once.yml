@@ -10,6 +10,26 @@ concurrency:
   group: zaskaleta-master-clone-gpu
   cancel-in-progress: false
 jobs:
+  diagnostic:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Diagnose failed C003 kernel without retry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch exact failed C003 logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          HANDLE="$KAGGLE_USERNAME/zaskaleta-c003-recovery-34074157342-1"
+          kaggle kernels status "$HANDLE" || true
+          kaggle kernels logs "$HANDLE" || true
+          echo 'Diagnostic only; no kernel push or GPU retry.'
   render-and-export:
     if: github.event_name == 'push' && github.event.head_commit.message == 'Fix pinned C003 source identity and run double preflight'
     runs-on: ubuntu-latest
