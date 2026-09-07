@@ -1,0 +1,94 @@
+name: C004 Encrypted Source Import
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-encrypted-source-import.yml'
+permissions:
+  contents: read
+jobs:
+  import-private-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      C004_TRANSFER_DRIVE_ID: 1tvSQnFiwWagefIdJBN4VqxgBtAWlzwL3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download current private Kaggle dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'kaggle>=1.8.0' 'gdown>=5,<6'
+          rm -rf .c004-import && mkdir -p .c004-import/dataset .c004-import/transfer
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-import/dataset --unzip -q
+          test -f .c004-import/dataset/.c004_transfer_private.pem || { echo 'C004 transfer private key missing from private dataset'; exit 12; }
+      - name: Download encrypted transfer only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m gdown "https://drive.google.com/uc?id=${C004_TRANSFER_DRIVE_ID}" -O .c004-import/transfer/transfer.zip
+          unzip -q .c004-import/transfer/transfer.zip -d .c004-import/transfer/payload
+          test -f .c004-import/transfer/payload/C004_SOURCE.enc
+          test -f .c004-import/transfer/payload/C004_KEY.envelope
+      - name: Decrypt only inside private import runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -decrypt \
+            -inkey .c004-import/dataset/.c004_transfer_private.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in .c004-import/transfer/payload/C004_KEY.envelope \
+            -out .c004-import/transfer/key_iv.bin
+          python - <<'PY'
+          from pathlib import Path
+          b=Path('.c004-import/transfer/key_iv.bin').read_bytes()
+          if len(b)!=48: raise SystemExit('invalid transfer key material')
+          Path('.c004-import/transfer/key.hex').write_text(b[:32].hex())
+          Path('.c004-import/transfer/iv.hex').write_text(b[32:].hex())
+          PY
+          KEYHEX=$(cat .c004-import/transfer/key.hex)
+          IVHEX=$(cat .c004-import/transfer/iv.hex)
+          openssl enc -d -aes-256-cbc -K "$KEYHEX" -iv "$IVHEX" \
+            -in .c004-import/transfer/payload/C004_SOURCE.enc \
+            -out .c004-import/dataset/C004_SOURCE_50280_SEGMENT_10.4_13.6.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 .c004-import/dataset/C004_SOURCE_50280_SEGMENT_10.4_13.6.mp4 | awk '{d=$1+0; if (d<3.0 || d>3.4) exit 1}'
+          rm -f .c004-import/transfer/key_iv.bin .c004-import/transfer/key.hex .c004-import/transfer/iv.hex
+      - name: Version private dataset with C004 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('.c004-import/dataset/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PY
+          kaggle datasets version -p .c004-import/dataset -m 'Import encrypted C004 source segment privately' --dir-mode zip -q
+          echo 'C004_PRIVATE_SOURCE_IMPORTED'
+      - name: Verify private source is now listed
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            if kaggle datasets files "$KAGGLE_PRIVATE_DATASET" | grep -F 'C004_SOURCE_50280_SEGMENT_10.4_13.6.mp4' >/dev/null; then
+              echo 'C004_PRIVATE_SOURCE_PRESENT_VERIFIED'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Private dataset version did not expose C004 source in time.'
+          exit 13
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'The public transport object is encrypted ciphertext only.'
+          echo 'Plain C004 source exists only in the private runner and private Kaggle dataset.'
+          echo 'No raw biometric media or biometric hashes are uploaded to GitHub.'
+          echo 'No GPU render, stable overwrite, or promotion occurs in this import workflow.'
