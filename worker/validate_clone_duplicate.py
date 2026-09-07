@@ -28,7 +28,6 @@ def duration_seconds(path):
 
 
 def dhash_at(path, timestamp):
-    # Decode one frame to a tiny 9x8 grayscale image. This is perceptual, not codec-byte based.
     proc = subprocess.run(
         [
             "ffmpeg", "-v", "error", "-ss", f"{timestamp:.6f}", "-i", str(path),
@@ -58,7 +57,6 @@ def hamming(a, b):
 def sample_times(duration, count):
     if count < 2:
         raise ValueError("sample_count must be >= 2")
-    # Avoid codec edge behavior at exactly 0/end.
     start = min(0.25, duration * 0.05)
     end = max(start, duration - min(0.25, duration * 0.05))
     if end <= start:
@@ -74,13 +72,16 @@ def compare(candidate, prior, policy):
     c_duration = duration_seconds(candidate)
     p_duration = duration_seconds(prior)
     duration_delta = abs(c_duration - p_duration)
+    common_duration = min(c_duration, p_duration)
+    common_duration_ratio = common_duration / max(c_duration, p_duration)
 
     count = int(policy["sample_count"])
     max_dist = int(policy["per_frame_dhash_distance_max"])
     min_ratio = float(policy["near_duplicate_matching_frame_ratio_min"])
     max_duration_delta = float(policy["duration_delta_seconds_max"])
+    containment_min_ratio = float(policy["containment_matching_frame_ratio_min"])
+    containment_common_min = float(policy["containment_common_duration_ratio_min"])
 
-    common_duration = min(c_duration, p_duration)
     times = sample_times(common_duration, count)
     distances = []
     matching = 0
@@ -90,8 +91,10 @@ def compare(candidate, prior, policy):
         if d <= max_dist:
             matching += 1
     ratio = matching / len(times)
+
     near_duplicate = duration_delta <= max_duration_delta and ratio >= min_ratio
-    blocked = exact or near_duplicate
+    contained_duplicate = ratio >= containment_min_ratio and common_duration_ratio >= containment_common_min
+    blocked = exact or near_duplicate or contained_duplicate
 
     return {
         "prior": str(prior),
@@ -101,9 +104,11 @@ def compare(candidate, prior, policy):
         "candidate_duration": c_duration,
         "prior_duration": p_duration,
         "duration_delta": duration_delta,
+        "common_duration_ratio": common_duration_ratio,
         "frame_hamming_distances": distances,
         "matching_frame_ratio": ratio,
         "near_duplicate": near_duplicate,
+        "contained_duplicate": contained_duplicate,
         "blocked": blocked,
     }
 
