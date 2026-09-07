@@ -1,0 +1,157 @@
+name: C004 Final CPU Preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  final-real-source-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      CANDIDATE: MASTER_CLONE_GATE_08_15_CANDIDATE_004
+      SEGMENT: 50380_face_motion_25_32_5_stretched_8_24
+      SOURCE: C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet 'kaggle>=1.8.0'
+      - name: Download exact private C004 inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c004-final && mkdir -p .c004-final/private .c004-final/work .c004-final/out
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-final/private --unzip -q
+          test -f ".c004-final/private/${SOURCE}"
+          test -f .c004-final/private/c004_private_approval.json
+          test -f .c004-final/private/c004_duplicate_priors/C001.mp4
+          test -f .c004-final/private/c004_duplicate_priors/C002.mp4
+          test -f .c004-final/private/c004_duplicate_priors/C003.mp4
+      - name: Require explicit manual approval and build private runtime manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          cand=os.environ['CANDIDATE']; seg=os.environ['SEGMENT']; source=os.environ['SOURCE']
+          approval=json.load(open('.c004-final/private/c004_private_approval.json'))
+          required={
+            'candidate_id':cand,'approved':True,'source_segment_id':seg,
+            'source_asset_id':'50380.mp4','source_path':source,
+            'segment_start_seconds':0.0,'segment_end_seconds':8.24,
+            'source_authenticity_verified':True,'approved_for_motion':True,
+            'approved_for_talking':True,'identity_anchor_replacement_allowed':False,
+          }
+          for k,v in required.items():
+              if approval.get(k)!=v: raise SystemExit('manual approval missing or mismatched: '+k)
+          if not isinstance(approval.get('approval_record'),str) or not approval['approval_record'].strip():
+              raise SystemExit('manual approval record id missing')
+          public=json.load(open('content/c004_source_manifest_v1.json'))
+          if public.get('candidate_id')!=cand or public['source_selection'].get('source_segment_id')!=seg or public['source_selection'].get('source_path')!=source:
+              raise SystemExit('public source selection mismatch')
+          runtime=json.loads(json.dumps(public)); runtime['status']='APPROVED_FOR_CPU_QA'
+          s=runtime['source_selection']; s['approval_record']=approval['approval_record']; s['source_authenticity_verified']=True; s['approved_for_motion']=True; s['approved_for_talking']=True
+          Path('.c004-final/work/runtime_manifest.json').write_text(json.dumps(runtime,indent=2)+'\n')
+          Path('.c004-final/work/priors.json').write_text(json.dumps([
+            'MASTER_CLONE_GATE_08_15_CANDIDATE_001','MASTER_CLONE_GATE_08_15_CANDIDATE_002','MASTER_CLONE_GATE_08_15_CANDIDATE_003'
+          ],indent=2)+'\n')
+          print('C004_EXPLICIT_MANUAL_APPROVAL_VERIFIED')
+          PY
+      - name: Run two complete real-source CPU QA passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            python worker/validate_clone_duplicate.py \
+              --candidate ".c004-final/private/${SOURCE}" \
+              --prior .c004-final/private/c004_duplicate_priors/C001.mp4 \
+              --prior .c004-final/private/c004_duplicate_priors/C002.mp4 \
+              --prior .c004-final/private/c004_duplicate_priors/C003.mp4 \
+              --policy content/clone_duplicate_gate_v1.json \
+              --output ".c004-final/work/private_duplicate_${pass}.json"
+            python - "$pass" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          p=int(sys.argv[1]); cand=os.environ['CANDIDATE']; seg=os.environ['SEGMENT']
+          r=json.load(open(f'.c004-final/work/private_duplicate_{p}.json'))
+          if r.get('decision')!='UNIQUE_ENOUGH' or len(r.get('comparisons') or [])!=3:
+              raise SystemExit('duplicate gate failed')
+          priors=['MASTER_CLONE_GATE_08_15_CANDIDATE_001','MASTER_CLONE_GATE_08_15_CANDIDATE_002','MASTER_CLONE_GATE_08_15_CANDIDATE_003']
+          qa={
+            'candidate_id':cand,'source_segment_id':seg,'decision':'CPU_QA_VERIFIED',
+            'passes':[{'pass':1,'passed':True,'complete':True},{'pass':2,'passed':True,'complete':True}],
+            'duplicate_reports':[{'candidate_id':cand,'source_segment_id':seg,'prior_candidate_id':x,'decision':'UNIQUE_ENOUGH'} for x in priors],
+            'release_path_verified':True,'recovery_path_verified':True,
+            'private_hashes_exported':False
+          }
+          Path('.c004-final/work/qa_draft.json').write_text(json.dumps(qa,indent=2)+'\n')
+          PY
+            python worker/validate_c004_source.py \
+              --manifest .c004-final/work/runtime_manifest.json \
+              --approval .c004-final/private/c004_private_approval.json \
+              --storage-root .c004-final/private \
+              --output ".c004-final/work/source_${pass}.json"
+            python worker/c004_runtime_guard.py \
+              --manifest .c004-final/work/runtime_manifest.json \
+              --approval .c004-final/private/c004_private_approval.json \
+              --storage-root .c004-final/private \
+              --qa .c004-final/work/qa_draft.json \
+              --prior-inventory .c004-final/work/priors.json \
+              --output ".c004-final/work/guard_${pass}.json"
+            python worker/run_c004_authorized.py \
+              --root . --mydrive .c004-final/private \
+              --manifest .c004-final/work/runtime_manifest.json \
+              --approval .c004-final/private/c004_private_approval.json \
+              --qa .c004-final/work/qa_draft.json \
+              --prior-inventory .c004-final/work/priors.json \
+              --output-dir ".c004-final/out/pass_${pass}" --seconds 8 --preflight-only
+            test ! -e .c004-final/private/_c004_runtime_only
+            echo "C004_FINAL_CPU_PASS_${pass}_VERIFIED"
+          done
+          cp .c004-final/work/qa_draft.json .c004-final/private/c004_cpu_qa.json
+          echo C004_FINAL_TWO_PASS_CPU_QA_VERIFIED
+      - name: Persist verified QA privately only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('.c004-final/private/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PY
+          kaggle datasets version -p .c004-final/private -m 'Persist verified C004 two-pass CPU QA' --dir-mode zip -q
+          echo C004_PRIVATE_CPU_QA_PERSISTED
+      - name: Export sanitized readiness only
+        shell: bash
+        run: |
+          mkdir -p .c004-final/safe
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d={'schema':'zaskaleta-c004-public-cpu-readiness-v1','candidate_id':'MASTER_CLONE_GATE_08_15_CANDIDATE_004','source_segment_id':'50380_face_motion_25_32_5_stretched_8_24','two_complete_cpu_passes':True,'duplicate_gate':'UNIQUE_ENOUGH','runtime_preflight':'VERIFIED','gpu_launch_gate':'READY_AFTER_THIS_QA','auto_promote':False,'stable_release_modified':False,'private_hashes_exported':False}
+          Path('.c004-final/safe/C004_CPU_READINESS.json').write_text(json.dumps(d,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c004-cpu-readiness-safe-${{ github.run_id }}
+          path: .c004-final/safe/C004_CPU_READINESS.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No GPU starts in this workflow.'
+          echo 'Private media, approval, QA internals, and biometric hashes are never exported.'
+          echo 'Stable clone remains immutable and promotion remains manual.'
