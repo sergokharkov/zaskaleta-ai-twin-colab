@@ -1,0 +1,89 @@
+name: C004 Real Source Duplicate QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-real-source-duplicate-qa.yml'
+      - 'worker/validate_clone_duplicate.py'
+      - 'content/clone_duplicate_gate_v1.json'
+permissions:
+  contents: read
+jobs:
+  real-source-duplicate-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      CANDIDATE: MASTER_CLONE_GATE_08_15_CANDIDATE_004
+      SEGMENT: 50380_face_motion_25_32_5_stretched_8_24
+      SOURCE: C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU media tools and Kaggle client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet 'kaggle>=1.8.0'
+      - name: Materialize private source and prior inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c004-realqa && mkdir -p .c004-realqa/private .c004-realqa/reports
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-realqa/private --unzip -q
+          test -f ".c004-realqa/private/${SOURCE}"
+          test -f .c004-realqa/private/c004_duplicate_priors/C001.mp4
+          test -f .c004-realqa/private/c004_duplicate_priors/C002.mp4
+          test -f .c004-realqa/private/c004_duplicate_priors/C003.mp4
+      - name: Run complete duplicate gate twice on real source
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            python worker/validate_clone_duplicate.py \
+              --candidate ".c004-realqa/private/${SOURCE}" \
+              --prior .c004-realqa/private/c004_duplicate_priors/C001.mp4 \
+              --prior .c004-realqa/private/c004_duplicate_priors/C002.mp4 \
+              --prior .c004-realqa/private/c004_duplicate_priors/C003.mp4 \
+              --policy content/clone_duplicate_gate_v1.json \
+              --output ".c004-realqa/reports/private_${pass}.json"
+            python - "$pass" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          p=int(sys.argv[1])
+          r=json.loads(Path(f'.c004-realqa/reports/private_{p}.json').read_text())
+          if r.get('decision')!='UNIQUE_ENOUGH' or r.get('manual_override_allowed') is not False or len(r.get('comparisons') or [])!=3:
+              raise SystemExit('real-source duplicate gate did not pass')
+          safe={
+              'candidate_id':os.environ['CANDIDATE'],
+              'source_segment_id':os.environ['SEGMENT'],
+              'pass':p,
+              'decision':'UNIQUE_ENOUGH',
+              'comparison_count':3,
+              'private_hashes_exported':False,
+          }
+          Path(f'.c004-realqa/reports/safe_{p}.json').write_text(json.dumps(safe,indent=2)+'\n')
+          print(f'C004_REAL_SOURCE_DUPLICATE_PASS_{p}_VERIFIED')
+          PY
+          done
+          echo C004_REAL_SOURCE_DUPLICATE_TWO_PASS_VERIFIED
+      - name: Publish sanitized CPU decision only
+        uses: actions/upload-artifact@v4
+        with:
+          name: c004-real-source-duplicate-safe-${{ github.run_id }}
+          path: .c004-realqa/reports/safe_*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Real source and prior media remain private inputs.'
+          echo 'Private duplicate reports containing file hashes are never uploaded.'
+          echo 'Only sanitized UNIQUE_ENOUGH decisions are exported; no GPU, promotion, or stable overwrite occurs.'
