@@ -1,0 +1,57 @@
+name: C003 Reference FPS Remediation
+on:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - '.github/workflows/c003-reference-fps-remediation.yml'
+permissions:
+  contents: write
+jobs:
+  remediate-and-double-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KAGGLE_USERNAME: audit-user
+      KAGGLE_PRIVATE_DATASET: audit-user/dry-run
+      GITHUB_RUN_ATTEMPT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/c003-audit-blockers
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact source-timing remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/c003_reference_fps_remediation.py
+          git diff --check
+          python -m py_compile kaggle/first_gate_alignment_render.py kaggle/test_c003_release.py kaggle/audit_c003_source.py kaggle/c003_release_safety.py
+          git add content/talking_profile_v2.json kaggle/first_gate_alignment_render.py kaggle/test_c003_release.py kaggle/audit_c003_source.py kaggle/c003_release_safety.py
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Preserve exact approved C003 reference FPS'
+      - name: Double complete CPU verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'PyYAML>=6,<7'
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          for pass in 1 2; do
+            echo "C003_REFERENCE_FPS_QA_PASS_${pass}"
+            python kaggle/test_c003_release.py
+            python kaggle/c003_release_safety.py --verify
+            python kaggle/audit_c003_source.py
+            python kaggle/recover_c003_readonly.py --dry-run
+          done
+          git diff --check
+      - name: Publish only doubly verified remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:fix/c003-audit-blockers
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'CPU/source-only remediation. Exact approved reference timing is preserved.'
+          echo 'No GPU submission, no private asset access, no stable promotion.'
