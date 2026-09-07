@@ -9,11 +9,11 @@
     "mode": "explicit_approved_segment_only",
     "fallback_to_primary_behavior_allowed": false,
     "fallback_to_c003_allowed": false,
-    "source_segment_id": "50280_natural_selfie_10_4_13_6",
-    "source_asset_id": "50280.mp4",
-    "source_path": "50280.mp4",
-    "segment_start_seconds": 10.4,
-    "segment_end_seconds": 13.6,
+    "source_segment_id": "50380_face_motion_25_32_5_stretched_8_24",
+    "source_asset_id": "50380.mp4",
+    "source_path": "C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4",
+    "segment_start_seconds": 0.0,
+    "segment_end_seconds": 8.24,
     "approval_record": null,
     "source_authenticity_verified": false,
     "approved_for_motion": false,
@@ -24,8 +24,15 @@
     "intended_roles": ["motion", "talking_behavior"],
     "identity_training_allowed": false,
     "identity_anchor_use_allowed": false,
-    "selected_segment_duration_seconds": 3.2,
-    "selection_reason": "Natural real-world selfie footage with the primary subject visible continuously in the selected interval, without the stylized background and text overlays present in 53693. The short clean interval is preferred over a longer contaminated montage."
+    "selected_segment_duration_seconds": 8.24,
+    "derivation": {
+      "original_source": "50380.mp4",
+      "original_range_seconds": [25.0, 32.5],
+      "time_scale": 1.1,
+      "crop_only_for_motion_focus": true,
+      "audio_removed": true
+    },
+    "selection_reason": "The reviewed interval keeps one face continuously visible for the full first-gate duration and contains non-repeating facial/head micro-motion. It is used only as candidate motion/talking behavior; overlays/background are excluded from identity learning and the canonical identity anchor remains unchanged."
   },
   "quarantined_review_uploads": {
     "55443.mp4": "prior_generated_candidate_001",
@@ -49,5 +56,5 @@
     "biometric_hashes_in_github": false,
     "public_report_contains_only_sanitized_decisions": true
   },
-  "notes": "Selection is not approval. The source is stored privately and must be explicitly approved in private provenance before the manifest may advance to APPROVED_FOR_CPU_QA. GPU remains blocked until that approval and real-source duplicate/CPU QA complete."
+  "notes": "Selection is not approval. The derived source must be present in the private runtime store and explicitly approved there before the manifest may advance to APPROVED_FOR_CPU_QA. GPU remains blocked until that approval and real-source duplicate/CPU QA complete."
 }
