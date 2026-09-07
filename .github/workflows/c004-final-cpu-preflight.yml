@@ -1,4 +1,5 @@
 name: C004 Final CPU Preflight
+# Revalidation checkpoint: C004 logic unchanged; current main must receive fresh CPU evidence.
 on:
   push:
     branches: [main]
@@ -188,7 +189,6 @@ jobs:
                 '--prior-inventory', str(work/'priors.json'),
                 '--output-dir', '.c004-final/out/recovery', '--seconds', '8',
                 '--preflight-only', '--source-cpu-only']
-          # Exercise the real cleanup path after media derivation, without GPU execution.
           with patch.object(sys, 'argv', args), patch.object(runner.shutil, 'copytree', side_effect=RuntimeError('C004_CPU_INJECTED_FAILURE')):
               try:
                   runner.main()
