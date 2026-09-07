@@ -18,17 +18,23 @@ def load(path: Path):
 
 def classify_failure(text: str, known: list[dict]) -> dict:
     low = text.lower()
+    best = None
     for record in known:
-        symptom = str(record.get('symptom', '')).lower()
-        tokens = [t for t in symptom.replace('/', ' ').replace('_', ' ').split() if len(t) >= 5]
-        score = sum(1 for t in tokens if t in low)
-        if score >= 2:
-            return {
-                'matched_failure_id': record.get('id'),
-                'failure_class': record.get('class', 'unknown'),
-                'known_fix': record.get('fix'),
-                'known_status': record.get('status'),
-            }
+        signatures = [str(x).strip().lower() for x in (record.get('signatures') or []) if str(x).strip()]
+        if not signatures:
+            continue
+        hits = sum(1 for signature in signatures if signature in low)
+        required = 1 if len(signatures) == 1 else 2
+        if hits >= required and (best is None or hits > best[0]):
+            best = (hits, record)
+    if best is not None:
+        record = best[1]
+        return {
+            'matched_failure_id': record.get('id'),
+            'failure_class': record.get('class', 'unknown'),
+            'known_fix': record.get('fix'),
+            'known_status': record.get('status'),
+        }
     if '404' in low and 'dataset' in low:
         cls = 'private_dataset_propagation'
     elif 'filenotfounderror' in low or 'no such file' in low:
