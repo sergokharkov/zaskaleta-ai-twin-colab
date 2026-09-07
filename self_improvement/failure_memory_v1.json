@@ -5,6 +5,7 @@
       "id": "dataset-propagation-404",
       "class": "private_dataset_propagation",
       "symptom": "Kaggle private dataset download returned 404 immediately after dataset versioning",
+      "signatures": ["404", "dataset"],
       "fix": "Retry private dataset download with bounded propagation wait before failing closed",
       "status": "mitigated"
     },
@@ -12,6 +13,7 @@
       "id": "kernel-slug-mismatch",
       "class": "orchestration",
       "symptom": "Kaggle output retrieval could not access the submitted private kernel because title/slug handling was inconsistent",
+      "signatures": ["permission 'kernels.get' was denied", "zaskaleta-c004-"],
       "fix": "Use one exact run-scoped slug for metadata, push, status and output retrieval",
       "status": "fixed"
     },
@@ -19,6 +21,7 @@
       "id": "running-treated-as-terminal-failure",
       "class": "orchestration",
       "symptom": "GitHub workflow treated KernelWorkerStatus.RUNNING as failure after log-follow returned",
+      "signatures": ["kernelworkerstatus.running", "did not reach a confirmed complete state"],
       "fix": "Poll Kaggle status until explicit terminal COMPLETE/ERROR/CANCELLED/FAILED or timeout",
       "status": "fixed"
     },
@@ -26,6 +29,7 @@
       "id": "nested-private-source-path",
       "class": "private_asset_resolution",
       "symptom": "C004 source existed in the mounted private dataset but validator expected it directly under the dataset root",
+      "signatures": ["filenotfounderror", "c004_source_50380_face_motion_8_25_cropped.mp4"],
       "fix": "Resolve the approved source recursively inside the private storage root and require exactly one match",
       "status": "fixed"
     }
