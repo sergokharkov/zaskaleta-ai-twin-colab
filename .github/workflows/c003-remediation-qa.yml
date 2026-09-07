@@ -1,0 +1,44 @@
+name: C003 Remediation QA
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - 'kaggle/**'
+      - 'worker/lipsync_musetalk.py'
+      - 'worker/voice_mms_openvoice.py'
+      - 'content/**'
+      - '.github/workflows/c003-remediation-qa.yml'
+      - '.github/workflows/kaggle-c003-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source parsers only
+        run: python -m pip install --quiet 'PyYAML>=6,<7'
+      - name: Execute C003 CPU regression tests
+        run: python kaggle/test_c003_release.py
+      - name: Audit every tracked source file
+        run: python kaggle/audit_c003_source.py
+      - name: Verify readonly package without GPU
+        env:
+          KAGGLE_USERNAME: audit-user
+          KAGGLE_PRIVATE_DATASET: audit-user/dry-run
+        run: python kaggle/recover_c003_readonly.py --dry-run
+      - name: Upload safe source audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c003-remediation-audit-${{ github.run_id }}
+          path: .audit-reports/c003-source-audit.json
+          if-no-files-found: warn
+          retention-days: 7
