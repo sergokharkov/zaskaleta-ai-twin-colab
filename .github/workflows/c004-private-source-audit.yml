@@ -1,0 +1,51 @@
+name: C004 Private Source Audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-private-source-audit.yml'
+permissions:
+  contents: read
+jobs:
+  private-source-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify private candidate inventory without downloading media or starting GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          python - <<'PY'
+          import os
+          from kaggle.api.kaggle_api_extended import KaggleApi
+          api=KaggleApi(); api.authenticate()
+          handle=os.environ['KAGGLE_PRIVATE_DATASET']
+          files=api.dataset_list_files(handle).files or []
+          names={getattr(f,'name','') for f in files}
+          candidates=['50380.mp4','50280.mp4','50280(1).mp4','53693.mp4','53693(1).mp4','48025.mp4']
+          present=[name for name in candidates if name in names]
+          print('C004_PRIVATE_DATASET_AUTH_OK')
+          print('C004_CANDIDATE_COUNT=' + str(len(present)))
+          print('C004_50380_PRESENT=' + str('50380.mp4' in names).lower())
+          print('C004_50280_PRESENT=' + str(('50280.mp4' in names) or ('50280(1).mp4' in names)).lower())
+          print('C004_53693_PRESENT=' + str(('53693.mp4' in names) or ('53693(1).mp4' in names)).lower())
+          print('C004_48025_PRESENT=' + str('48025.mp4' in names).lower())
+          if not present:
+              raise SystemExit('No registered C004 source candidate exists in the private dataset')
+          PY
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'CPU metadata audit only. No private media downloaded, no hashes exported, no GPU started, no stable clone modified.'
