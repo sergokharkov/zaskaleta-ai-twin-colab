@@ -1,6 +1,6 @@
 {
   "schema": "zaskaleta-clone-quality-gate-v1",
-  "purpose": "Block promotion of a generated clone version unless identity, talking, voice and motion quality all pass explicit review gates.",
+  "purpose": "Block promotion of a generated clone version unless identity, talking, voice, motion quality and candidate novelty all pass explicit review gates.",
   "manual_approval_required": true,
   "auto_promote_to_master": false,
   "thresholds": {
@@ -24,7 +24,11 @@
     "unnatural_motion",
     "voice_identity_mismatch",
     "unapproved_reference_used",
-    "generated_material_used_as_identity_without_approval"
+    "generated_material_used_as_identity_without_approval",
+    "duplicate_candidate"
+  ],
+  "required_pre_promotion_gates": [
+    "clone_duplicate_gate_v1"
   ],
   "promotion_flow": [
     "CANDIDATE",
@@ -37,6 +41,7 @@
     "metrics_json",
     "reference_manifest",
     "render_manifest",
+    "duplicate_gate_report",
     "manual_reviewer_decision"
   ],
   "versioning": {
