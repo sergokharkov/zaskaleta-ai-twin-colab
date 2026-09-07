@@ -1,6 +1,10 @@
 # Revalidate after C004 face-detail postprocess fix; temporal thresholds remain unchanged
 name: C004 Kaggle GPU Launch
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-kaggle-gpu-launch.yml'
   workflow_dispatch:
   workflow_run:
     workflows: ['C004 Final CPU Preflight']
@@ -15,6 +19,7 @@ permissions:
 jobs:
   launch-c004:
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
@@ -33,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PYCODE'
-          import json, os, urllib.request
+          import json, os, time, urllib.request
           repo=os.environ['GITHUB_REPOSITORY']
           def get(path):
               req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
@@ -46,7 +51,8 @@ jobs:
               raise SystemExit('Stale or non-main GPU launch blocked')
           if os.environ['GITHUB_RUN_ATTEMPT']!='1':
               raise SystemExit('GPU workflow retries blocked; inspect existing Kaggle job first')
-          if os.environ['GITHUB_EVENT_NAME']=='workflow_run':
+          event_name=os.environ['GITHUB_EVENT_NAME']
+          if event_name=='workflow_run':
               wr=event.get('workflow_run') or {}
               if wr.get('path')!='.github/workflows/c004-final-cpu-preflight.yml':
                   raise SystemExit('Unexpected workflow_run source')
@@ -56,13 +62,24 @@ jobs:
                   raise SystemExit('CPU preflight repository mismatch')
               cpu_id=str(wr['id'])
           else:
-              runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
-              cpu=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
-                   and r['head_branch']=='main' and r['conclusion']=='success'
-                   and r.get('head_repository',{}).get('full_name')==repo]
-              if not cpu:
-                  raise SystemExit('Successful CPU preflight for exact main commit required')
-              cpu_id=str(cpu[0]['id'])
+              deadline=time.time()+2700
+              cpu_id=None
+              while time.time()<deadline:
+                  runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
+                  cpu=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
+                       and r['head_branch']=='main' and r['conclusion']=='success'
+                       and r.get('head_repository',{}).get('full_name')==repo]
+                  if cpu:
+                      cpu_id=str(cpu[0]['id'])
+                      break
+                  failed=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
+                          and r['head_branch']=='main' and r.get('conclusion') in ('failure','cancelled','timed_out')]
+                  if failed:
+                      raise SystemExit('Exact-SHA CPU preflight failed; GPU launch blocked')
+                  print('Waiting for exact-SHA CPU preflight to complete successfully...', flush=True)
+                  time.sleep(20)
+              if not cpu_id:
+                  raise SystemExit('Timed out waiting for successful exact-SHA CPU preflight')
           runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
           previous=[r for r in runs if r['path']=='.github/workflows/c004-kaggle-gpu-launch.yml'
                     and str(r['id'])!=os.environ['GITHUB_RUN_ID'] and int(r['id'])<int(os.environ['GITHUB_RUN_ID'])]
