@@ -17,7 +17,7 @@ jobs:
         with:
           ref: fix/c003-audit-blockers
           fetch-depth: 1
-      - name: Repair only the confirmed quotation defect
+      - name: Repair only the two confirmed quotation defects
         shell: bash
         run: |
           set -euo pipefail
@@ -26,16 +26,17 @@ jobs:
           from pathlib import Path
           path=Path('content/monthly_plan_30_days.json')
           text=path.read_text(encoding='utf-8')
-          old='Не кожне "ні" — слабкість.'
-          new='Не кожне \\"ні\\" — слабкість.'
-          if text.count(old)!=1:
-              raise RuntimeError('Expected unique JSON quotation defect not found')
-          repaired=text.replace(old,new,1)
-          document=json.loads(repaired)
+          phrases=['Не кожне "ні" — слабкість.','Сказати "я зроблю" займає секунду.']
+          for old in phrases:
+              if text.count(old)!=1:
+                  raise RuntimeError('Expected unique JSON quotation defect not found: '+old)
+              new=old.replace(chr(34),chr(92)+chr(34))
+              text=text.replace(old,new,1)
+          document=json.loads(text)
           if document.get('series')!='30 днів сили' or len(document.get('days',[]))!=30:
               raise RuntimeError('Unexpected monthly-plan structure; refusing repair')
-          path.write_text(repaired,encoding='utf-8')
-          print('JSON_REPAIR_VALIDATED: one quotation escape, 30 days preserved')
+          path.write_text(text,encoding='utf-8')
+          print('JSON_REPAIR_VALIDATED: two quotation escapes, 30 days preserved')
           PY
           git diff --check
           git add content/monthly_plan_30_days.json
