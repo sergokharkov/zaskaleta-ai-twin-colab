@@ -1,0 +1,58 @@
+name: C003 Release Safety Patch
+on:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - '.github/workflows/c003-release-patch.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch-and-double-audit:
+    if: github.ref == 'refs/heads/fix/c003-audit-blockers'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/c003-audit-blockers
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/c003_release_safety.py --apply --verify
+          git diff --check
+          git add kaggle/first_gate_alignment_render.py kaggle/recover_c003.py kaggle/autopilot_kernel_c003.py
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Enforce double C003 preflight and safe review provenance'
+      - name: Double CPU preflight on exact commit
+        shell: bash
+        env:
+          KAGGLE_USERNAME: audit-user
+          KAGGLE_PRIVATE_DATASET: audit-user/dry-run
+          GITHUB_RUN_ATTEMPT: '1'
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'PyYAML>=6,<7'
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          export GITHUB_RUN_ID="${{ github.run_id }}"
+          for pass in 1 2; do
+            echo "C003_CPU_PREFLIGHT_PASS_${pass}"
+            python kaggle/test_c003_release.py
+            python kaggle/c003_release_safety.py --verify
+            python kaggle/audit_c003_source.py
+            python kaggle/recover_c003_readonly.py --dry-run
+          done
+          git diff --check
+          git status --short
+      - name: Publish tested fixes to review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:fix/c003-audit-blockers
+      - name: Summary
+        if: always()
+        run: echo 'Source-only patch. No Kaggle GPU, private media, paid infrastructure, or stable promotion.'
