@@ -98,7 +98,18 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .c004-launch-private && mkdir -p .c004-launch-private
-          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-launch-private --unzip -q
+          downloaded=false
+          for attempt in $(seq 1 12); do
+            rm -rf .c004-launch-private/*
+            if kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-launch-private --unzip -q; then
+              downloaded=true
+              echo "C004_PRIVATE_DATASET_AVAILABLE_ATTEMPT=${attempt}"
+              break
+            fi
+            echo "C004_PRIVATE_DATASET_NOT_READY_ATTEMPT=${attempt}"
+            sleep 15
+          done
+          [ "$downloaded" = true ] || { echo 'Private Kaggle dataset remained unavailable after propagation retries'; exit 1; }
           test -f .c004-launch-private/c004_private_approval.json
           test -f .c004-launch-private/c004_cpu_qa.json
           test -f .c004-launch-private/C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4
@@ -164,8 +175,6 @@ jobs:
           }
           Path('.kaggle-c004/run_identity.json').write_text(json.dumps(identity,indent=2)+'\n')
 
-          # Kaggle uploads only code_file. Embed public code and run identity in that file.
-          # Materialize under working, never the read-only /kaggle/src directory.
           entry=Path('kaggle/verified_c004_entry.py').read_text()
           bundle_b64=base64.b64encode(Path('.kaggle-c004/source_bundle.zip').read_bytes()).decode('ascii')
           boot=[
@@ -220,7 +229,7 @@ jobs:
           for attempt in $(seq 1 18); do
             rm -rf .c004-review/*
             kaggle kernels output "$KERNEL" -p .c004-review \
-              --file-pattern '(^|/)zaskaleta_c004_status\.json$|(^|/)CLONE_V2_TALKING_TEST\.mp4$' -q || true
+              --file-pattern '(^|/)zaskaleta_c004_status\\.json$|(^|/)CLONE_V2_TALKING_TEST\\.mp4$' -q || true
             VIDEO="$(find .c004-review -type f -name 'CLONE_V2_TALKING_TEST.mp4' -print -quit)"
             STATUS="$(find .c004-review -type f -name 'zaskaleta_c004_status.json' -print -quit)"
             if [ -n "$VIDEO" ] && [ -n "$STATUS" ]; then break; fi
