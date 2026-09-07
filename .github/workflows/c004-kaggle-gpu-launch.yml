@@ -188,15 +188,32 @@ jobs:
         run: |
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/zaskaleta-c004-${GITHUB_RUN_ID}"
-          rc=0
-          timeout 6600 kaggle kernels logs "$KERNEL" --follow --interval 15 > /tmp/c004-private-kernel.log 2>&1 || rc=$?
-          if [ "$rc" -eq 124 ]; then cat /tmp/c004-private-kernel.log; echo 'C004 Kaggle render timed out'; exit 1; fi
-          if [ "$rc" -ne 0 ]; then cat /tmp/c004-private-kernel.log; echo "C004 Kaggle log follow failed rc=$rc"; exit "$rc"; fi
-          status_out="$(kaggle kernels status "$KERNEL" 2>&1)"
-          echo "$status_out"
-          echo "$status_out" | grep -Eqi 'complete|status.*complete|kernel.*complete' || { echo 'C004 kernel did not reach a confirmed complete state'; exit 1; }
-          ! echo "$status_out" | grep -Eqi 'error|cancel|failed'
-          echo C004_KAGGLE_TERMINAL_SUCCESS_VERIFIED
+          deadline=$(( $(date +%s) + 6600 ))
+          last=''
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
+            compact="$(printf '%s' "$status_out" | tr '\n' ' ')"
+            if [ "$compact" != "$last" ]; then
+              echo "C004_KAGGLE_STATUS=${compact}"
+              last="$compact"
+            fi
+            if echo "$status_out" | grep -Eqi 'KernelWorkerStatus\.(COMPLETE|COMPLETED)|status[^A-Za-z]*(COMPLETE|COMPLETED)|kernel[^A-Za-z]*(COMPLETE|COMPLETED)'; then
+              echo C004_KAGGLE_TERMINAL_SUCCESS_VERIFIED
+              exit 0
+            fi
+            if echo "$status_out" | grep -Eqi 'KernelWorkerStatus\.(ERROR|CANCELLED|CANCELED|FAILED)|\b(ERROR|CANCELLED|CANCELED|FAILED)\b'; then
+              echo 'C004 Kaggle kernel reached a terminal failure state'
+              exit 1
+            fi
+            if echo "$status_out" | grep -Eqi 'KernelWorkerStatus\.(RUNNING|QUEUED|STARTING)|\b(RUNNING|QUEUED|STARTING|PENDING)\b'; then
+              sleep 20
+              continue
+            fi
+            echo 'C004 Kaggle status is not yet classifiable; retrying'
+            sleep 20
+          done
+          echo 'C004 Kaggle render timed out before terminal status'
+          exit 1
       - name: Download generated C004 review output only
         shell: bash
         run: |
