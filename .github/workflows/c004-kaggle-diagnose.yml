@@ -14,7 +14,7 @@ jobs:
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      FAILED_KERNEL_SLUG: zaskaleta-c004-34123302515
+      FAILED_KERNEL_SLUG: zaskaleta-c004-34126296646
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -36,7 +36,7 @@ jobs:
           echo '--- LOG TAIL ---'
           rm -f /tmp/c004-kaggle.log
           kaggle kernels logs "$KERNEL" > /tmp/c004-kaggle.log 2>&1 || true
-          tail -n 220 /tmp/c004-kaggle.log | sed -E 's#(/kaggle/input/)[^ /]+#\1<private-dataset>#g'
+          tail -n 260 /tmp/c004-kaggle.log | sed -E 's#(/kaggle/input/)[^ /]+#\1<private-dataset>#g'
           echo '--- SAFE STATUS OUTPUT ---'
           rm -rf /tmp/c004-output && mkdir -p /tmp/c004-output
           kaggle kernels output "$KERNEL" -p /tmp/c004-output --file-pattern '(^|/)zaskaleta_c004_status\.json$' -q || true
