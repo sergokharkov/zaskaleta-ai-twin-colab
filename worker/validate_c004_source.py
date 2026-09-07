@@ -37,8 +37,25 @@ def validate(manifest, approval, storage):
     roles = [k for k in ('motion', 'talking') if s.get('approved_for_' + k) is True]
     if not roles or any(approval.get('approved_for_' + k) is not True for k in roles):
         raise ValueError('source_role_not_approved')
+
     root = storage.resolve(strict=True)
-    source = (root / s['source_path']).resolve(strict=True)
+    requested = Path(s['source_path'])
+    if requested.is_absolute() or '..' in requested.parts:
+        raise ValueError('unsafe_source_path')
+
+    direct = root / requested
+    if direct.is_file():
+        source = direct.resolve(strict=True)
+    else:
+        # Kaggle may mount a private dataset one directory deeper than the logical
+        # dataset root. Permit that layout only when the approved relative name
+        # resolves to exactly one file beneath the private storage root.
+        matches = [p.resolve(strict=True) for p in root.rglob(requested.name) if p.is_file() and p.name == requested.name]
+        matches = [p for p in matches if p.is_relative_to(root)]
+        if len(matches) != 1:
+            raise ValueError('source_path_resolution_count_' + str(len(matches)))
+        source = matches[0]
+
     if not source.is_relative_to(root) or not source.is_file():
         raise ValueError('source_outside_private_storage')
     if source.name in {'55572.mp4', '55573.mp4'} or 'C003' in source.name.upper():
