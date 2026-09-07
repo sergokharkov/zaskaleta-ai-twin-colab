@@ -1,6 +1,12 @@
 name: C004 Final CPU Preflight
 on:
   workflow_dispatch:
+    inputs:
+      confirm_reviewed_source:
+        description: 'I reviewed authentic 50380.mp4 (25.0-32.5s) and derived C004 (8.24s); approve motion/talking only, no identity-anchor replacement'
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 jobs:
@@ -8,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
+      CONFIRM_REVIEWED_SOURCE: ${{ inputs.confirm_reviewed_source }}
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
@@ -38,6 +45,50 @@ jobs:
           test -f .c004-final/private/c004_duplicate_priors/C001.mp4
           test -f .c004-final/private/c004_duplicate_priors/C002.mp4
           test -f .c004-final/private/c004_duplicate_priors/C003.mp4
+      - name: Record optional explicit source-owner attestation privately
+        if: ${{ inputs.confirm_reviewed_source == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          if os.environ.get('CONFIRM_REVIEWED_SOURCE')!='true':
+              raise SystemExit('explicit source review checkbox required')
+          if os.environ.get('GITHUB_EVENT_NAME')!='workflow_dispatch' or os.environ.get('GITHUB_REF')!='refs/heads/main':
+              raise SystemExit('manual dispatch on main required')
+          if os.environ.get('GITHUB_ACTOR')!='sergokharkov' or os.environ.get('GITHUB_TRIGGERING_ACTOR')!='sergokharkov':
+              raise SystemExit('source owner must submit the attestation')
+          path=Path('.c004-final/private/c004_private_approval.json')
+          approval=json.loads(path.read_text())
+          expected={
+              'candidate_id':'MASTER_CLONE_GATE_08_15_CANDIDATE_004',
+              'source_segment_id':'50380_face_motion_25_32_5_stretched_8_24',
+              'source_asset_id':'50380.mp4',
+              'source_path':'C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4',
+              'segment_start_seconds':0.0,'segment_end_seconds':8.24,
+              'identity_anchor_replacement_allowed':False}
+          public=json.loads(Path('content/c004_source_manifest_v1.json').read_text())
+          if public.get('candidate_id')!=expected['candidate_id']:
+              raise SystemExit('manifest candidate mismatch')
+          for key,value in expected.items():
+              if approval.get(key)!=value:
+                  raise SystemExit('approval scope mismatch: '+key)
+              if key!='candidate_id' and public['source_selection'].get(key)!=value:
+                  raise SystemExit('manifest scope mismatch: '+key)
+          if approval.get('approved') is True:
+              print('Existing approval preserved; normal validation follows.')
+          else:
+              if approval.get('approved') is not False or approval.get('approval_state')!='PENDING_EXPLICIT_USER_APPROVAL':
+                  raise SystemExit('only an explicitly pending record may be approved')
+              approval.update(approved=True, approval_state='EXPLICIT_USER_APPROVED',
+                  source_authenticity_verified=True, approved_for_motion=True, approved_for_talking=True,
+                  approval_record='github-manual-source-attestation-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],
+                  authenticity_evidence_type='source_owner_manual_review_attestation',
+                  approval_actor=os.environ['GITHUB_ACTOR'])
+              path.write_text(json.dumps(approval,indent=2)+'\n')
+              print('C004_SOURCE_OWNER_ATTESTATION_RECORDED_PRIVATELY')
+          PYCODE
       - name: Require explicit manual approval and build private runtime manifest
         shell: bash
         run: |
@@ -69,6 +120,23 @@ jobs:
           ],indent=2)+'\n')
           print('C004_EXPLICIT_MANUAL_APPROVAL_VERIFIED')
           PY
+      - name: Persist explicitly attested approval privately after source validation
+        if: ${{ inputs.confirm_reviewed_source == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python worker/validate_c004_source.py \
+            --manifest .c004-final/work/runtime_manifest.json \
+            --approval .c004-final/private/c004_private_approval.json \
+            --storage-root .c004-final/private \
+            --output .c004-final/work/attested_source.json
+          python - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          Path('.c004-final/private/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PYCODE
+          kaggle datasets version -p .c004-final/private -m 'Record explicit C004 source-owner attestation' --dir-mode zip -q
+          echo C004_EXPLICIT_APPROVAL_PERSISTED_PRIVATELY
       - name: Run two complete real-source CPU QA passes
         shell: bash
         run: |
