@@ -1,0 +1,80 @@
+name: C004 Private Approval Bootstrap
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-private-approval-bootstrap.yml'
+permissions:
+  contents: read
+jobs:
+  bootstrap-pending-approval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize private dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          rm -rf .c004-approval && mkdir -p .c004-approval/dataset
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-approval/dataset --unzip -q
+      - name: Create pending record only when no approval exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f .c004-approval/dataset/c004_private_approval.json ]; then
+            python - <<'PY'
+          import json
+          d=json.load(open('.c004-approval/dataset/c004_private_approval.json'))
+          if d.get('approved') is True:
+              print('Existing explicit approval preserved; bootstrap makes no changes.')
+          else:
+              print('Existing pending approval preserved.')
+          PY
+            echo 'C004_APPROVAL_RECORD_ALREADY_PRESENT'
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d={
+            'schema':'zaskaleta-c004-private-approval-v1',
+            'candidate_id':'MASTER_CLONE_GATE_08_15_CANDIDATE_004',
+            'approved':False,
+            'approval_state':'PENDING_EXPLICIT_USER_APPROVAL',
+            'source_segment_id':'50380_face_motion_25_32_5_stretched_8_24',
+            'source_asset_id':'50380.mp4',
+            'source_path':'C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4',
+            'segment_start_seconds':0.0,
+            'segment_end_seconds':8.24,
+            'approval_record':None,
+            'source_authenticity_verified':False,
+            'approved_for_motion':False,
+            'approved_for_talking':False,
+            'identity_anchor_replacement_allowed':False,
+            'manual_approval_required':True
+          }
+          Path('.c004-approval/dataset/c004_private_approval.json').write_text(json.dumps(d,indent=2)+'\n')
+          PY
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('.c004-approval/dataset/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PY
+          kaggle datasets version -p .c004-approval/dataset -m 'Add pending C004 manual approval record' --dir-mode zip -q
+          echo 'C004_PENDING_APPROVAL_BOOTSTRAPPED'
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'This workflow never grants approval.'
+          echo 'It creates only a fail-closed PENDING_EXPLICIT_USER_APPROVAL record when none exists.'
+          echo 'No GPU, promotion, identity-anchor replacement, media export, or biometric hash export occurs.'
