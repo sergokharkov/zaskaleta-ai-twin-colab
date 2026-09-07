@@ -1,0 +1,79 @@
+name: C004 Source Guard QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/validate_c004_source.py'
+      - 'worker/c004_runtime_guard.py'
+      - 'content/c004_source_manifest_v1.json'
+      - '.github/workflows/c004-source-guard-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  c004-source-guard-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build synthetic private fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .qa/private/media .qa/out
+          printf 'synthetic-source' > .qa/private/media/new_source.mp4
+          printf 'synthetic-c003' > .qa/private/C003_old.mp4
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          candidate='MASTER_CLONE_GATE_08_15_CANDIDATE_004'
+          manifest=json.load(open('content/c004_source_manifest_v1.json'))
+          manifest.update(status='APPROVED_FOR_CPU_QA')
+          s=manifest['source_selection']
+          s.update(source_segment_id='seg-new-01', source_asset_id='asset-new-01', source_path='media/new_source.mp4', segment_start_seconds=1.0, segment_end_seconds=9.0, approval_record='private-approval-001', source_authenticity_verified=True, approved_for_motion=True, approved_for_talking=True)
+          approval={'candidate_id':candidate,'approved':True,'source_segment_id':'seg-new-01','source_asset_id':'asset-new-01','source_path':'media/new_source.mp4','segment_start_seconds':1.0,'segment_end_seconds':9.0,'approval_record':'private-approval-001','source_authenticity_verified':True,'approved_for_motion':True,'approved_for_talking':True,'identity_anchor_replacement_allowed':False}
+          priors=['MASTER_CLONE_GATE_08_15_CANDIDATE_002','MASTER_CLONE_GATE_08_15_CANDIDATE_003']
+          qa={'candidate_id':candidate,'source_segment_id':'seg-new-01','decision':'CPU_QA_VERIFIED','passes':[{'passed':True,'complete':True},{'passed':True,'complete':True}],'duplicate_reports':[{'candidate_id':candidate,'source_segment_id':'seg-new-01','prior_candidate_id':p,'decision':'UNIQUE_ENOUGH'} for p in priors],'release_path_verified':True,'recovery_path_verified':True}
+          Path('.qa/approved_manifest.json').write_text(json.dumps(manifest))
+          Path('.qa/approval.json').write_text(json.dumps(approval))
+          Path('.qa/priors.json').write_text(json.dumps(priors))
+          Path('.qa/qa.json').write_text(json.dumps(qa))
+          bad=dict(approval); bad['source_path']='C003_old.mp4'; bad['source_segment_id']='seg-c003'; bad['source_asset_id']='asset-c003'
+          bad_manifest=json.loads(json.dumps(manifest)); bad_manifest['source_selection'].update(source_path='C003_old.mp4',source_segment_id='seg-c003',source_asset_id='asset-c003')
+          Path('.qa/c003_manifest.json').write_text(json.dumps(bad_manifest)); Path('.qa/c003_approval.json').write_text(json.dumps(bad))
+          PY
+      - name: Two complete CPU QA passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile worker/validate_c004_source.py worker/c004_runtime_guard.py
+          for pass in 1 2; do
+            python worker/validate_c004_source.py --manifest .qa/approved_manifest.json --approval .qa/approval.json --storage-root .qa/private --output .qa/out/source_${pass}.json
+            python -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["decision"]=="SOURCE_APPROVED_FOR_CPU_QA" and r["gpu_launch_allowed"] is False' .qa/out/source_${pass}.json
+            python worker/c004_runtime_guard.py --manifest .qa/approved_manifest.json --approval .qa/approval.json --storage-root .qa/private --qa .qa/qa.json --prior-inventory .qa/priors.json --output .qa/out/guard_${pass}.json
+            python -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["decision"]=="C004_PREFLIGHT_VERIFIED" and r["gpu_launch_allowed"] is False and r["auto_promote"] is False' .qa/out/guard_${pass}.json
+            set +e
+            python worker/validate_c004_source.py --manifest content/c004_source_manifest_v1.json --approval .qa/approval.json --storage-root .qa/private --output .qa/out/hold_${pass}.json
+            rc=$?
+            set -e
+            test "$rc" -eq 3
+            set +e
+            python worker/validate_c004_source.py --manifest .qa/c003_manifest.json --approval .qa/c003_approval.json --storage-root .qa/private --output .qa/out/c003_${pass}.json
+            rc=$?
+            set -e
+            test "$rc" -eq 3
+            python - <<PY
+          import json
+          p='.qa/qa.json'; q=json.load(open(p)); q['passes']=[{'passed':True,'complete':True}]; open('.qa/qa_incomplete.json','w').write(json.dumps(q))
+          PY
+            set +e
+            python worker/c004_runtime_guard.py --manifest .qa/approved_manifest.json --approval .qa/approval.json --storage-root .qa/private --qa .qa/qa_incomplete.json --prior-inventory .qa/priors.json --output .qa/out/incomplete_${pass}.json
+            rc=$?
+            set -e
+            test "$rc" -eq 3
+            echo "C004_CPU_PASS_${pass}_VERIFIED"
+          done
+          echo C004_SOURCE_GUARD_TWO_PASS_CPU_VERIFIED
