@@ -35,8 +35,9 @@
     "pad_end_only": true,
     "do_not_loop_audio": true,
     "do_not_repeat_reference_motion": true,
-    "preserve_reference_fps": 25,
-    "max_tempo_correction": 0.06
+    "preserve_reference_fps": 30,
+    "max_tempo_correction": 0.06,
+    "reference_fps_tolerance": 0.1
   },
   "voice_presets": [
     "calm",
@@ -49,7 +50,10 @@
   "default_voice_preset": "conversational",
   "test_gate": {
     "duration_seconds": 12,
-    "range_seconds": [8, 15],
+    "range_seconds": [
+      8,
+      15
+    ],
     "must_pass": [
       "identity stable",
       "no face drift",

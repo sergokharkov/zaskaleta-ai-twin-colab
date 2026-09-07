@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CPU-only C003 regression tests. No private data, model loading, network, or GPU."""
 import copy
+from fractions import Fraction
 import hashlib
 import importlib.util
 import json
@@ -40,11 +41,12 @@ class C003Contracts(unittest.TestCase):
                     self.assertIs(data['render_completed'], False)
 
     def test_reference_fps_and_no_repetition(self):
-        meta = {'format': {'duration': '12.0'}, 'streams': [{'codec_type': 'video', 'avg_frame_rate': '25/1'}]}
-        policy = {'preserve_reference_fps': 25, 'do_not_repeat_reference_motion': True, 'do_not_loop_audio': True}
-        self.assertEqual(renderer.enforce_reference_policy(meta, 10.0, policy), 25)
+        exact_fps = '24660000/821821'
+        meta = {'format': {'duration': '12.0'}, 'streams': [{'codec_type': 'video', 'avg_frame_rate': exact_fps}]}
+        policy = {'preserve_reference_fps': 30, 'reference_fps_tolerance': 0.1, 'do_not_repeat_reference_motion': True, 'do_not_loop_audio': True}
+        self.assertEqual(renderer.enforce_reference_policy(meta, 10.0, policy), Fraction(exact_fps))
         bad = copy.deepcopy(meta)
-        bad['streams'][0]['avg_frame_rate'] = '30/1'
+        bad['streams'][0]['avg_frame_rate'] = '25/1'
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(bad, 10.0, policy)
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(meta, 13.0, policy)
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(meta, 10.0, {**policy, 'do_not_repeat_reference_motion': False})

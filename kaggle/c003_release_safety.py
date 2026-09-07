@@ -60,7 +60,8 @@ def verify():
     autopilot = (ROOT/'kaggle/autopilot_kernel_c003.py').read_text()
     for p in (renderer, recovery, autopilot):
         ast.parse(p)
-    assert "'reference_fps':int(fps)" in renderer
+    assert "'reference_fps':round(float(fps),6)" in renderer
+    assert "'reference_fps_rational':str(fps)" in renderer
     assert 'safe_provenance = {' in recovery
     assert 'safe_path.write_text(json.dumps(safe_provenance, indent=2) + chr(10)' in recovery
     assert 'Double private asset preflight mismatch' in autopilot

@@ -85,7 +85,7 @@ def main():
     check('identity_reference_contract',profile['canonical_identity_photo'] in profile['photo_filenames'] and len(profile['photo_filenames'])==profile['master_photo_count']==6 and package['components']['identity']['canonical_anchor']==profile['canonical_identity_photo'])
     check('motion_reference_contract',package['components']['motion']['supporting_reference']==talking['reference_policy']['supporting']=='MASTER_BEHAVIOR_02.mp4')
     align=talking['audio_alignment']
-    check('audio_policy',align['lipsync_sample_rate']==16000 and align['final_audio_sample_rate']==24000 and align['pad_end_only'] is True and align['do_not_loop_audio'] is True and align['do_not_repeat_reference_motion'] is True and align['preserve_reference_fps']==25)
+    check('audio_policy',align['lipsync_sample_rate']==16000 and align['final_audio_sample_rate']==24000 and align['pad_end_only'] is True and align['do_not_loop_audio'] is True and align['do_not_repeat_reference_motion'] is True and align['preserve_reference_fps']==30 and align.get('reference_fps_tolerance')==0.1)
     check('duration_policy',duration['ordered_gates'][0]=={'id':'gate_08_15','min_seconds':8,'max_seconds':15} and duration['rules']['manual_promotion_required'] is True and duration['rules']['identity_regression_tolerance']==0)
     check('promotion_policy',quality['manual_approval_required'] is True and quality['auto_promote_to_master'] is False and release['auto_promote'] is False and release['identity_regression_tolerance']==0)
     renderer=source('kaggle/first_gate_alignment_render.py')

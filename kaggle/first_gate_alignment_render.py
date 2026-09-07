@@ -55,16 +55,17 @@ def audio_stream(meta):
     return streams[0]
 
 def enforce_reference_policy(meta, target, align):
-    preserve_reference_fps = int(align['preserve_reference_fps'])
+    nominal_fps = Fraction(str(align['preserve_reference_fps']))
+    tolerance = Fraction(str(align.get('reference_fps_tolerance', 0)))
     do_not_repeat_reference_motion = align['do_not_repeat_reference_motion'] is True
     if not do_not_repeat_reference_motion or align.get('do_not_loop_audio') is not True:
         raise RuntimeError('Reference/audio loop policy weakened')
     fps = Fraction(video_stream(meta)['avg_frame_rate'])
-    if fps != preserve_reference_fps:
-        raise RuntimeError(f'Approved reference FPS {fps} does not match required {preserve_reference_fps}; normalization requires a separate approved change')
+    if fps <= 0 or abs(fps - nominal_fps) > tolerance:
+        raise RuntimeError(f'Approved reference FPS {fps} is outside nominal {nominal_fps} +/- {tolerance}; source timing must not be normalized implicitly')
     if duration_seconds(meta) + 0.001 < target:
         raise RuntimeError('Approved motion reference is shorter than speech; repetition is forbidden')
-    return preserve_reference_fps
+    return fps
 
 def validate_final(meta, audio_duration, final_sr, fps, intermediate):
     duration = duration_seconds(meta)
@@ -176,7 +177,7 @@ def main():
             'lipsync_16k_sha256':sha256_file(lipsync_audio),
             'final_24k_sha256':sha256_file(final_audio)},
         'motion_reference_sha256':sha256_file(motion),
-        'reference_fps':int(fps),'render_duration_seconds':round(render_duration,3),
+        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),'render_duration_seconds':round(render_duration,3),
         'final_audio_sample_rate':final_sr,'lipsync_sample_rate':lip_sr,
         'pad_end_only':True,'do_not_repeat_reference_motion':True,
         'subjective_identity_review':'PENDING_MANUAL_REVIEW',
@@ -189,7 +190,7 @@ def main():
         'gate':'gate_08_15','gate_range_seconds':[8,15], 'technical_gate_pass':True,
         'single_component_change':'audio_alignment','motion_reference_unchanged':motion_name,
         'lipsync_sample_rate':lip_sr,'final_audio_sample_rate':final_sr,'pad_end_only':True,
-        'reference_fps':int(fps),'do_not_repeat_reference_motion':True,
+        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),'do_not_repeat_reference_motion':True,
         'render_duration_seconds':round(render_duration,3),'render_sha256':final_hash,
         'provenance_sha256':sha256_file(provenance),
         'subjective_identity_review':'PENDING_MANUAL_REVIEW','lip_sync_review':'PENDING_MANUAL_REVIEW',
