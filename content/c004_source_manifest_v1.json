@@ -9,11 +9,11 @@
     "mode": "explicit_approved_segment_only",
     "fallback_to_primary_behavior_allowed": false,
     "fallback_to_c003_allowed": false,
-    "source_segment_id": "53693_motion_02_14",
-    "source_asset_id": "53693.mp4",
-    "source_path": "53693.mp4",
-    "segment_start_seconds": 2.0,
-    "segment_end_seconds": 14.0,
+    "source_segment_id": "50280_natural_selfie_10_4_13_6",
+    "source_asset_id": "50280.mp4",
+    "source_path": "50280.mp4",
+    "segment_start_seconds": 10.4,
+    "segment_end_seconds": 13.6,
     "approval_record": null,
     "source_authenticity_verified": false,
     "approved_for_motion": false,
@@ -24,8 +24,15 @@
     "intended_roles": ["motion", "talking_behavior"],
     "identity_training_allowed": false,
     "identity_anchor_use_allowed": false,
-    "selected_segment_duration_seconds": 12.0,
-    "selection_reason": "Continuous upper-body behavior with meaningful gaze, head and expression changes; selected to avoid another reuse of the existing primary/supporting MASTER_BEHAVIOR references."
+    "selected_segment_duration_seconds": 3.2,
+    "selection_reason": "Natural real-world selfie footage with the primary subject visible continuously in the selected interval, without the stylized background and text overlays present in 53693. The short clean interval is preferred over a longer contaminated montage."
+  },
+  "quarantined_review_uploads": {
+    "55443.mp4": "prior_generated_candidate_001",
+    "55523.mp4": "prior_generated_candidate_002",
+    "55572.mp4": "duplicate_of_prior_generated_candidate_003",
+    "55573.mp4": "prior_generated_candidate_003",
+    "eligible_as_c004_source": false
   },
   "required_preflight": [
     "explicit_source_segment_resolves_uniquely",
@@ -42,5 +49,5 @@
     "biometric_hashes_in_github": false,
     "public_report_contains_only_sanitized_decisions": true
   },
-  "notes": "Selection is not approval. The source must be imported into the private runtime store and explicitly approved there before the manifest may advance to APPROVED_FOR_CPU_QA. GPU remains blocked."
+  "notes": "Selection is not approval. The source is stored privately and must be explicitly approved in private provenance before the manifest may advance to APPROVED_FOR_CPU_QA. GPU remains blocked until that approval and real-source duplicate/CPU QA complete."
 }
