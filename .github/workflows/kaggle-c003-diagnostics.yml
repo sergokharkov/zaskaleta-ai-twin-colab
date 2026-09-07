@@ -1,0 +1,42 @@
+name: Kaggle C003 Diagnostics
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/kaggle-c003-diagnostics.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --quiet 'kaggle>=1.8.0' 'kagglehub>=0.3.13'
+      - name: Inspect exact failed kernel without GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, subprocess, json, pathlib, traceback
+          handle=f"{os.environ['KAGGLE_USERNAME']}/zaskaleta-c003-34065058863-1"
+          print('EXACT_KERNEL='+handle,flush=True)
+          for args in (['kernels','status',handle],['kernels','logs',handle]):
+              p=subprocess.run(['kaggle',*args],capture_output=True,text=True,timeout=90)
+              print('COMMAND',args,'EXIT',p.returncode,flush=True)
+              print(p.stdout[-50000:],flush=True)
+              print(p.stderr[-10000:],flush=True)
+          import kagglehub
+          for name in ('zaskaleta_autopilot_status.json','first_gate_alignment/MASTER_CLONE_GATE_08_15_CANDIDATE_003.evidence.json'):
+              try:
+                  p=kagglehub.notebook_output_download(handle,path=name,output_dir='.c003-diagnostics',force_download=True)
+                  print('OUTPUT',name,pathlib.Path(p).read_text()[:20000],flush=True)
+              except Exception as exc:
+                  print('OUTPUT_UNAVAILABLE',name,type(exc).__name__,str(exc)[:1000],flush=True)
+          PY
