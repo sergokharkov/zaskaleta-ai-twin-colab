@@ -1,0 +1,62 @@
+name: Clone Duplicate Gate QA
+
+on:
+  push:
+    paths:
+      - 'worker/validate_clone_duplicate.py'
+      - 'content/clone_duplicate_gate_v1.json'
+      - '.github/workflows/clone-duplicate-gate-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  duplicate-gate-cpu-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Build synthetic videos
+        run: |
+          mkdir -p .qa
+          ffmpeg -v error -f lavfi -i "testsrc2=size=320x240:rate=30" -t 4 -c:v libx264 -pix_fmt yuv420p .qa/base.mp4
+          ffmpeg -v error -i .qa/base.mp4 -c:v libx264 -crf 28 -pix_fmt yuv420p .qa/reencoded.mp4
+          ffmpeg -v error -f lavfi -i "color=c=black:size=320x240:rate=30" -t 2 -c:v libx264 -pix_fmt yuv420p .qa/tail.mp4
+          printf "file 'base.mp4'\nfile 'tail.mp4'\n" > .qa/list.txt
+          ffmpeg -v error -f concat -safe 0 -i .qa/list.txt -c copy .qa/extended.mp4
+          ffmpeg -v error -f lavfi -i "smptebars=size=320x240:rate=30" -t 4 -c:v libx264 -pix_fmt yuv420p .qa/unique.mp4
+      - name: Pass 1 exact duplicate must fail closed
+        run: |
+          if python worker/validate_clone_duplicate.py --candidate .qa/base.mp4 --prior .qa/base.mp4 --output .qa/exact.json; then
+            echo 'Exact duplicate unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -q 'DUPLICATE_CANDIDATE' .qa/exact.json
+      - name: Pass 1 re-encoded duplicate must fail closed
+        run: |
+          if python worker/validate_clone_duplicate.py --candidate .qa/reencoded.mp4 --prior .qa/base.mp4 --output .qa/reencoded.json; then
+            echo 'Re-encoded duplicate unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -q 'DUPLICATE_CANDIDATE' .qa/reencoded.json
+      - name: Pass 1 extended duplicate must fail closed
+        run: |
+          if python worker/validate_clone_duplicate.py --candidate .qa/extended.mp4 --prior .qa/base.mp4 --output .qa/extended.json; then
+            echo 'Extended duplicate unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -q 'DUPLICATE_CANDIDATE' .qa/extended.json
+      - name: Pass 1 unique video must pass
+        run: |
+          python worker/validate_clone_duplicate.py --candidate .qa/unique.mp4 --prior .qa/base.mp4 --output .qa/unique.json
+          grep -q 'UNIQUE_ENOUGH' .qa/unique.json
+      - name: Pass 2 repeat all CPU checks
+        run: |
+          set -e
+          for pair in "base.mp4 base.mp4 exact2" "reencoded.mp4 base.mp4 reencoded2" "extended.mp4 base.mp4 extended2"; do
+            set -- $pair
+            if python worker/validate_clone_duplicate.py --candidate .qa/$1 --prior .qa/$2 --output .qa/$3.json; then exit 1; fi
+            grep -q 'DUPLICATE_CANDIDATE' .qa/$3.json
+          done
+          python worker/validate_clone_duplicate.py --candidate .qa/unique.mp4 --prior .qa/base.mp4 --output .qa/unique2.json
+          grep -q 'UNIQUE_ENOUGH' .qa/unique2.json
+          echo C004_DUPLICATE_GATE_CPU_VERIFIED
