@@ -82,7 +82,10 @@ def load_models(device):
     tts.eval()
     repo = snapshot_download(repo_id='myshell-ai/OpenVoiceV2', allow_patterns=['converter/*'])
     converter_dir = Path(repo) / 'converter'
-    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device, enable_watermark=False)
+    # OpenVoiceV2 releases used by the Kaggle runtime do not all expose
+    # enable_watermark on ToneColorConverter.__init__. Watermark/provenance
+    # handling remains explicit in converter.convert(message=...).
+    converter = ToneColorConverter(str(converter_dir / 'config.json'), device=device)
     converter.load_ckpt(str(converter_dir / 'checkpoint.pth'))
     return tokenizer, tts, converter
 
