@@ -1,0 +1,35 @@
+name: MASTER CLONE C003 Source Audit
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'kaggle/audit_c003_source.py'
+      - '.github/workflows/kaggle-c003-source-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source parsers only
+        run: python -m pip install --quiet 'PyYAML>=6,<7'
+      - name: Inspect every tracked source file and C003 contracts
+        id: audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/audit_c003_source.py
+      - name: Upload safe audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c003-source-audit-${{ github.run_id }}
+          path: .audit-reports/c003-source-audit.json
+          if-no-files-found: warn
+          retention-days: 7
