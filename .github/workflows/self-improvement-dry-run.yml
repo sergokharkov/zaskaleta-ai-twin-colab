@@ -1,0 +1,65 @@
+name: MASTER CLONE Self-Improvement Dry Run
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'self_improvement/**'
+      - '.github/workflows/self-improvement-dry-run.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate guarded self-improvement controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile self_improvement/controller.py
+          python self_improvement/controller.py --output /tmp/improvement_report.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/improvement_report.json'))
+          assert d['mode']=='DRY_RUN_ONLY'
+          assert d['stable_master_modified'] is False
+          assert d['gpu_submitted'] is False
+          assert d['auto_promote'] is False
+          assert d['manual_identity_review_required'] is True
+          print('SELF_IMPROVEMENT_DRY_RUN_SAFETY_VERIFIED')
+          PY
+      - name: Known failure memory regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/failure.log <<'EOF'
+          FileNotFoundError: No such file or directory for C004_SOURCE inside mounted Kaggle private dataset
+          EOF
+          python self_improvement/controller.py --failure-log /tmp/failure.log --output /tmp/failure_report.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/failure_report.json'))
+          assert d['failure_analysis']['failure_class']=='private_asset_resolution'
+          assert d['stable_master_modified'] is False
+          assert d['gpu_submitted'] is False
+          print('SELF_IMPROVEMENT_FAILURE_MEMORY_VERIFIED')
+          PY
+      - name: Challenger regression gate test
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"temporal_pass_ratio":0.90,"identity_regression":0.0}' > /tmp/base.json
+          printf '%s\n' '{"temporal_pass_ratio":0.85,"identity_regression":0.0}' > /tmp/challenger.json
+          python self_improvement/controller.py --baseline-metrics /tmp/base.json --challenger-metrics /tmp/challenger.json --output /tmp/regression.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/regression.json'))
+          assert d['decision']=='REJECT_CHALLENGER_TECHNICAL_REGRESSION'
+          assert d['auto_promote'] is False
+          print('SELF_IMPROVEMENT_REGRESSION_GATE_VERIFIED')
+          PY
