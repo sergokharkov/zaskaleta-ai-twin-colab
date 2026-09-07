@@ -1,0 +1,17 @@
+{
+  "schema": "zaskaleta-clone-duplicate-gate-v1",
+  "purpose": "Block a candidate when its temporal visual content is identical or near-identical to an already evaluated clone candidate.",
+  "fail_closed": true,
+  "exact_file_sha256_blocks": true,
+  "sample_count": 12,
+  "per_frame_dhash_distance_max": 6,
+  "near_duplicate_matching_frame_ratio_min": 0.90,
+  "duration_delta_seconds_max": 0.35,
+  "hard_fail_flag": "duplicate_candidate",
+  "manual_override_allowed": false,
+  "notes": [
+    "The gate compares decoded visual content and therefore can detect many re-encoded duplicates.",
+    "A duplicate candidate must not be promoted or counted as new behavioral coverage.",
+    "Stable clone assets remain immutable."
+  ]
+}
