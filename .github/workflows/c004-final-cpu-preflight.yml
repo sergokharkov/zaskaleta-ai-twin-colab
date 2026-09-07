@@ -1,5 +1,5 @@
 name: C004 Final CPU Preflight
-# Revalidation checkpoint: C004 logic unchanged; current main must receive fresh CPU evidence.
+# Revalidation checkpoint: C004 face-detail fix; preserve all source, QA and release gates.
 on:
   push:
     branches: [main]
@@ -14,7 +14,7 @@ on:
         required: true
         default: false
 concurrency:
-  group: c004-private-cpu-qa
+  group: c004-private-cpu-qa-fast-ffmpeg
   cancel-in-progress: false
 permissions:
   contents: read
@@ -39,8 +39,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+          ffmpeg -version | head -n 1
           python -m pip install --quiet 'kaggle>=1.8.0'
       - name: Download exact private C004 inputs
         shell: bash
