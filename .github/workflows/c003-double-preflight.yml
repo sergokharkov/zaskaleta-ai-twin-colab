@@ -1,0 +1,44 @@
+name: C003 Double Preflight
+on:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - 'kaggle/recover_c003.py'
+      - '.github/workflows/c003-double-preflight.yml'
+permissions:
+  contents: read
+jobs:
+  double-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KAGGLE_USERNAME: audit-user
+      KAGGLE_PRIVATE_DATASET: audit-user/dry-run
+      GITHUB_RUN_ATTEMPT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source parser
+        run: python -m pip install --quiet 'PyYAML>=6,<7'
+      - name: Double complete CPU preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          export GITHUB_RUN_ID="${{ github.run_id }}"
+          for pass in 1 2; do
+            echo "C003_CPU_PREFLIGHT_PASS_${pass}"
+            python kaggle/test_c003_release.py
+            python kaggle/c003_release_safety.py --verify
+            python kaggle/audit_c003_source.py
+            python kaggle/recover_c003_readonly.py --dry-run
+          done
+          git diff --check
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Summary
+        if: always()
+        run: echo 'Double source-only verification; no GPU, private assets, stable promotion, or paid infrastructure.'
