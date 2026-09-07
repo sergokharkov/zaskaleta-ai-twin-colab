@@ -10,7 +10,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
@@ -39,13 +39,19 @@ jobs:
           tail -n 520 /tmp/c004-kaggle.log | sed -E 's#(/kaggle/input/)[^ /]+#\1<private-dataset>#g'
           echo '--- SAFE STATUS / TEMPORAL GUARD OUTPUT ---'
           rm -rf /tmp/c004-output && mkdir -p /tmp/c004-output
-          for attempt in $(seq 1 6); do
+          downloaded=0
+          for attempt in $(seq 1 12); do
             rm -rf /tmp/c004-output/*
+            echo "OUTPUT_DOWNLOAD_ATTEMPT=${attempt}/12"
             if kaggle kernels output "$KERNEL" -p /tmp/c004-output --file-pattern '(^|/)zaskaleta_c004_status\.json$|(^|/)CLONE_V2_TEMPORAL_FACE_GUARD\.json$|(^|/)CLONE_V2_RENDER_PROVENANCE_EVALUATION\.json$' -q; then
+              downloaded=1
               break
             fi
-            sleep 10
+            sleep 30
           done
+          if [ "$downloaded" -ne 1 ]; then
+            echo 'C004_OUTPUT_DOWNLOAD_RATE_LIMITED_OR_UNAVAILABLE'
+          fi
           STATUS="$(find /tmp/c004-output -type f -name 'zaskaleta_c004_status.json' -print -quit)"
           GUARD="$(find /tmp/c004-output -type f -name 'CLONE_V2_TEMPORAL_FACE_GUARD.json' -print -quit)"
           PROV="$(find /tmp/c004-output -type f -name 'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json' -print -quit)"
