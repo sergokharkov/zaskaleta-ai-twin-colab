@@ -1,0 +1,95 @@
+name: C004 Encrypted Priors Import
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-encrypted-priors-import.yml'
+permissions:
+  contents: read
+jobs:
+  import-private-priors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      C004_PRIORS_DRIVE_ID: 1FccF76pgeeBA7Lm3cwrAl_haZtUrxik6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download private dataset and encrypted prior bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'kaggle>=1.8.0' 'gdown>=5,<6'
+          rm -rf .c004-priors && mkdir -p .c004-priors/dataset .c004-priors/transfer
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-priors/dataset --unzip -q
+          test -f .c004-priors/dataset/.c004_transfer_private.pem
+          python -m gdown "https://drive.google.com/uc?id=${C004_PRIORS_DRIVE_ID}" -O .c004-priors/transfer/transfer.zip
+          unzip -q .c004-priors/transfer/transfer.zip -d .c004-priors/transfer/payload
+          test -f .c004-priors/transfer/payload/C004_PRIORS.enc
+          test -f .c004-priors/transfer/payload/C004_PRIORS_KEY.envelope
+      - name: Decrypt priors only inside private import runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -decrypt \
+            -inkey .c004-priors/dataset/.c004_transfer_private.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in .c004-priors/transfer/payload/C004_PRIORS_KEY.envelope \
+            -out .c004-priors/transfer/key_iv.bin
+          python - <<'PY'
+          from pathlib import Path
+          b=Path('.c004-priors/transfer/key_iv.bin').read_bytes()
+          if len(b)!=48: raise SystemExit('invalid transfer key material')
+          Path('.c004-priors/transfer/key.hex').write_text(b[:32].hex())
+          Path('.c004-priors/transfer/iv.hex').write_text(b[32:].hex())
+          PY
+          KEYHEX=$(cat .c004-priors/transfer/key.hex)
+          IVHEX=$(cat .c004-priors/transfer/iv.hex)
+          openssl enc -d -aes-256-cbc -K "$KEYHEX" -iv "$IVHEX" \
+            -in .c004-priors/transfer/payload/C004_PRIORS.enc \
+            -out .c004-priors/transfer/priors.zip
+          mkdir -p .c004-priors/dataset/c004_duplicate_priors
+          unzip -q .c004-priors/transfer/priors.zip -d .c004-priors/dataset/c004_duplicate_priors
+          test -f .c004-priors/dataset/c004_duplicate_priors/C001.mp4
+          test -f .c004-priors/dataset/c004_duplicate_priors/C002.mp4
+          test -f .c004-priors/dataset/c004_duplicate_priors/C003.mp4
+          rm -f .c004-priors/transfer/key_iv.bin .c004-priors/transfer/key.hex .c004-priors/transfer/iv.hex .c004-priors/transfer/priors.zip
+      - name: Version private dataset with duplicate priors
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('.c004-priors/dataset/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PY
+          kaggle datasets version -p .c004-priors/dataset -m 'Add C004 duplicate prior candidates privately' --dir-mode zip -q
+          echo 'C004_PRIVATE_PRIORS_IMPORTED'
+      - name: Verify prior inventory privately
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            listing=$(kaggle datasets files "$KAGGLE_PRIVATE_DATASET")
+            if echo "$listing" | grep -F 'c004_duplicate_priors/C001.mp4' >/dev/null \
+              && echo "$listing" | grep -F 'c004_duplicate_priors/C002.mp4' >/dev/null \
+              && echo "$listing" | grep -F 'c004_duplicate_priors/C003.mp4' >/dev/null; then
+              echo 'C004_PRIVATE_PRIOR_INVENTORY_VERIFIED'
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 13
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Public transport contains encrypted ciphertext only.'
+          echo 'Plain prior candidate media is written only into the private Kaggle dataset.'
+          echo 'No media or hashes are exported as GitHub artifacts; no GPU or promotion occurs.'
