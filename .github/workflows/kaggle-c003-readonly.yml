@@ -1,20 +1,14 @@
 name: Kaggle C003 Readonly Recovery
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/kaggle-c003-readonly.yml'
-
 permissions:
   contents: read
-
 concurrency:
-  group: kaggle-c003-recovery
+  group: zaskaleta-master-clone-gpu
   cancel-in-progress: false
-
 jobs:
   render-and-export:
+    if: ${{ vars.ZASKALETA_C003_GPU_APPROVED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 135
     env:
@@ -24,13 +18,17 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Validate source and read-only package without GPU
+      - name: Validate full source and read-only package without GPU
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install --quiet 'PyYAML>=6,<7'
+          python kaggle/audit_c003_source.py
           python -m py_compile kaggle/recover_c003.py kaggle/recover_c003_readonly.py kaggle/verified_c003_entry.py kaggle/autopilot_kernel_c003.py kaggle/first_gate_alignment_render.py
           python kaggle/recover_c003_readonly.py --dry-run
       - name: Install Kaggle clients
