@@ -17,28 +17,49 @@ jobs:
         with:
           ref: fix/c003-audit-blockers
           fetch-depth: 1
-      - name: Repair only the two confirmed quotation defects
+      - name: Escape only unescaped quotes inside voiceover strings
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import json,re
           from pathlib import Path
           path=Path('content/monthly_plan_30_days.json')
-          text=path.read_text(encoding='utf-8')
-          phrases=['Не кожне "ні" — слабкість.','Сказати "я зроблю" займає секунду.']
-          for old in phrases:
-              if text.count(old)!=1:
-                  raise RuntimeError('Expected unique JSON quotation defect not found: '+old)
-              new=old.replace(chr(34),chr(92)+chr(34))
-              text=text.replace(old,new,1)
-          document=json.loads(text)
-          if document.get('series')!='30 днів сили' or len(document.get('days',[]))!=30:
+          original=path.read_text(encoding='utf-8')
+          pattern=re.compile(r'^(\s*"voiceover"\s*:\s*")(.*)(",\s*)$')
+          changes=0
+          lines=[]
+          for line in original.splitlines(keepends=True):
+              match=pattern.match(line.rstrip('\r\n'))
+              if not match:
+                  lines.append(line)
+                  continue
+              prefix,raw,suffix=match.groups()
+              out=[]
+              i=0
+              while i<len(raw):
+                  ch=raw[i]
+                  if ch==chr(92) and i+1<len(raw):
+                      out.extend((ch,raw[i+1]))
+                      i+=2
+                  elif ch==chr(34):
+                      out.extend((chr(92),chr(34)))
+                      changes+=1
+                      i+=1
+                  else:
+                      out.append(ch)
+                      i+=1
+              lines.append(prefix+''.join(out)+suffix+line[len(line.rstrip('\r\n')):])
+          repaired=''.join(lines)
+          document=json.loads(repaired)
+          if document.get('series')!='30 днів сили' or [d.get('day') for d in document.get('days',[])]!=list(range(1,31)):
               raise RuntimeError('Unexpected monthly-plan structure; refusing repair')
-          path.write_text(text,encoding='utf-8')
-          print('JSON_REPAIR_VALIDATED: two quotation escapes, 30 days preserved')
+          if changes<3:
+              raise RuntimeError('Fewer than the three confirmed quotation defects were found')
+          path.write_text(repaired,encoding='utf-8')
+          print('JSON_REPAIR_VALIDATED: '+str(changes)+' quotation escapes, all 30 days preserved')
           PY
           git diff --check
           git add content/monthly_plan_30_days.json
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Fix monthly plan JSON quotation escaping'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Fix monthly plan voiceover JSON escaping'
           git push origin HEAD:fix/c003-audit-blockers
