@@ -31,7 +31,7 @@ jobs:
           kaggle kernels logs "$HANDLE" || true
           echo 'Diagnostic only; no kernel push or GPU retry.'
   render-and-export:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'Fix pinned C003 source identity and run double preflight'
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Retry C003 preserving approved reference FPS after double preflight'
     runs-on: ubuntu-latest
     timeout-minutes: 135
     env:
@@ -39,11 +39,11 @@ jobs:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
       PYTHONUNBUFFERED: '1'
-      C003_SOURCE_SHA: d7e9eeb29dfed55f8ca75477ef740bcbccc16a44
+      C003_SOURCE_SHA: 77366de171a39fecfe85aa5c8b348d137a10c507
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d7e9eeb29dfed55f8ca75477ef740bcbccc16a44
+          ref: 77366de171a39fecfe85aa5c8b348d137a10c507
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
