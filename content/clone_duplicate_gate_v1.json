@@ -8,7 +8,7 @@
   "near_duplicate_matching_frame_ratio_min": 0.90,
   "duration_delta_seconds_max": 0.35,
   "containment_matching_frame_ratio_min": 0.90,
-  "containment_common_duration_ratio_min": 0.70,
+  "containment_common_duration_ratio_min": 0.60,
   "hard_fail_flag": "duplicate_candidate",
   "manual_override_allowed": false,
   "notes": [
