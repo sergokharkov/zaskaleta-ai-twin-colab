@@ -1,4 +1,4 @@
-# Revalidate after OpenVoice wavmark runtime dependency fix
+# Revalidate after C004 face-detail postprocess fix; temporal thresholds remain unchanged
 name: C004 Kaggle GPU Launch
 on:
   workflow_dispatch:
