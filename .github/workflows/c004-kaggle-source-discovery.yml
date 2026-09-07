@@ -1,0 +1,59 @@
+name: C004 Kaggle Source Discovery
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-kaggle-source-discovery.yml'
+permissions:
+  contents: read
+jobs:
+  discover-private-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Discover candidate basenames across owned datasets without media download
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          python - <<'PY'
+          import os
+          from pathlib import PurePosixPath
+          from kaggle.api.kaggle_api_extended import KaggleApi
+          api=KaggleApi(); api.authenticate()
+          user=os.environ['KAGGLE_USERNAME']
+          wanted={'50380.mp4','50280.mp4','50280(1).mp4','53693.mp4','53693(1).mp4','48025.mp4'}
+          hits=[]
+          page=1
+          while page <= 20:
+              datasets=api.dataset_list(user=user, page=page) or []
+              if not datasets: break
+              for ds in datasets:
+                  ref=getattr(ds,'ref',None)
+                  if not ref: continue
+                  try: files=api.dataset_list_files(ref).files or []
+                  except Exception: continue
+                  bases={PurePosixPath(getattr(f,'name','')).name for f in files}
+                  matched=sorted(wanted & bases)
+                  if matched: hits.append((ref, matched))
+              page += 1
+          print('C004_KAGGLE_DISCOVERY_AUTH_OK')
+          print('C004_MATCHING_DATASET_COUNT=' + str(len(hits)))
+          for i,(ref,matched) in enumerate(hits,1):
+              print(f'C004_MATCH_{i}_DATASET=' + ref)
+              print(f'C004_MATCH_{i}_CANDIDATE_COUNT=' + str(len(matched)))
+              for key in ('50380','50280','53693','48025'):
+                  print(f'C004_MATCH_{i}_{key}=' + str(any(x.startswith(key) for x in matched)).lower())
+          if not hits: raise SystemExit('No registered C004 source candidate found across owned Kaggle datasets')
+          PY
+      - name: Safety summary
+        if: always()
+        run: echo 'Metadata discovery only; no private media downloaded, no hashes exported, no GPU started.'
