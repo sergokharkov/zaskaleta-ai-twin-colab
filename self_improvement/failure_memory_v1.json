@@ -1,0 +1,33 @@
+{
+  "schema": "zaskaleta-master-clone-failure-memory-v1",
+  "records": [
+    {
+      "id": "dataset-propagation-404",
+      "class": "private_dataset_propagation",
+      "symptom": "Kaggle private dataset download returned 404 immediately after dataset versioning",
+      "fix": "Retry private dataset download with bounded propagation wait before failing closed",
+      "status": "mitigated"
+    },
+    {
+      "id": "kernel-slug-mismatch",
+      "class": "orchestration",
+      "symptom": "Kaggle output retrieval could not access the submitted private kernel because title/slug handling was inconsistent",
+      "fix": "Use one exact run-scoped slug for metadata, push, status and output retrieval",
+      "status": "fixed"
+    },
+    {
+      "id": "running-treated-as-terminal-failure",
+      "class": "orchestration",
+      "symptom": "GitHub workflow treated KernelWorkerStatus.RUNNING as failure after log-follow returned",
+      "fix": "Poll Kaggle status until explicit terminal COMPLETE/ERROR/CANCELLED/FAILED or timeout",
+      "status": "fixed"
+    },
+    {
+      "id": "nested-private-source-path",
+      "class": "private_asset_resolution",
+      "symptom": "C004 source existed in the mounted private dataset but validator expected it directly under the dataset root",
+      "fix": "Resolve the approved source recursively inside the private storage root and require exactly one match",
+      "status": "fixed"
+    }
+  ]
+}
