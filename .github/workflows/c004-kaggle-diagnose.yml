@@ -37,10 +37,18 @@ jobs:
           rm -f /tmp/c004-kaggle.log
           kaggle kernels logs "$KERNEL" > /tmp/c004-kaggle.log 2>&1 || true
           tail -n 520 /tmp/c004-kaggle.log | sed -E 's#(/kaggle/input/)[^ /]+#\1<private-dataset>#g'
-          echo '--- SAFE STATUS OUTPUT ---'
+          echo '--- SAFE STATUS / TEMPORAL GUARD OUTPUT ---'
           rm -rf /tmp/c004-output && mkdir -p /tmp/c004-output
-          kaggle kernels output "$KERNEL" -p /tmp/c004-output --file-pattern '(^|/)zaskaleta_c004_status\.json$' -q || true
+          for attempt in $(seq 1 6); do
+            rm -rf /tmp/c004-output/*
+            if kaggle kernels output "$KERNEL" -p /tmp/c004-output --file-pattern '(^|/)zaskaleta_c004_status\.json$|(^|/)CLONE_V2_TEMPORAL_FACE_GUARD\.json$|(^|/)CLONE_V2_RENDER_PROVENANCE_EVALUATION\.json$' -q; then
+              break
+            fi
+            sleep 10
+          done
           STATUS="$(find /tmp/c004-output -type f -name 'zaskaleta_c004_status.json' -print -quit)"
+          GUARD="$(find /tmp/c004-output -type f -name 'CLONE_V2_TEMPORAL_FACE_GUARD.json' -print -quit)"
+          PROV="$(find /tmp/c004-output -type f -name 'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json' -print -quit)"
           if [ -n "$STATUS" ]; then
             python - "$STATUS" <<'PY'
           import json,sys
@@ -50,4 +58,32 @@ jobs:
           PY
           else
             echo 'C004_SAFE_STATUS_NOT_FOUND'
+          fi
+          if [ -n "$GUARD" ]; then
+            python - "$GUARD" <<'PY'
+          import json,sys,collections
+          d=json.load(open(sys.argv[1]))
+          reasons=collections.Counter()
+          for s in d.get('samples') or []:
+              for r in (s.get('failures') or ([s.get('reason')] if s.get('reason') and s.get('reason')!='ok' else [])):
+                  reasons[r]+=1
+          safe={k:d.get(k) for k in ['schema','candidate_id','passed','reason','sample_count','passed_samples','pass_ratio','required_pass_ratio','geometry_stable','maximum_normalized_center_jump','maximum_adjacent_area_ratio_multiplier'] if k in d}
+          safe['failure_reason_counts']=dict(reasons)
+          safe['samples']=[{k:s.get(k) for k in ['frame','face_count','passed','reason','failures','face_area_ratio','face_sharpness','normalized_center_jump','adjacent_area_ratio_multiplier']} for s in (d.get('samples') or [])]
+          print('TEMPORAL_GUARD_SAFE_SUMMARY')
+          print(json.dumps(safe,ensure_ascii=False,indent=2))
+          PY
+          else
+            echo 'C004_TEMPORAL_GUARD_NOT_FOUND'
+          fi
+          if [ -n "$PROV" ]; then
+            python - "$PROV" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          safe={k:d.get(k) for k in ['schema','passed','decision','candidate_id','blockers','manual_promotion_required','auto_promote'] if k in d}
+          print('RENDER_PROVENANCE_SAFE_SUMMARY')
+          print(json.dumps(safe,ensure_ascii=False,indent=2))
+          PY
+          else
+            echo 'C004_RENDER_PROVENANCE_EVALUATION_NOT_FOUND'
           fi
