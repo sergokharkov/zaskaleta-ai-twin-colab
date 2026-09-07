@@ -1,0 +1,57 @@
+name: Kaggle C003 Readonly Recovery
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kaggle-c003-readonly.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-c003-recovery
+  cancel-in-progress: false
+
+jobs:
+  render-and-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 135
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate source and read-only package without GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile kaggle/recover_c003.py kaggle/recover_c003_readonly.py kaggle/verified_c003_entry.py kaggle/autopilot_kernel_c003.py kaggle/first_gate_alignment_render.py
+          python kaggle/recover_c003_readonly.py --dry-run
+      - name: Install Kaggle clients
+        run: python -m pip install --disable-pip-version-check --quiet 'kaggle>=1.8.0' 'kagglehub>=0.3.13'
+      - name: Submit exact C003 and recover verified output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/recover_c003_readonly.py
+      - name: Upload verified C003 for manual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-clone-c003-readonly-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .kaggle-review/MASTER_CLONE_GATE_08_15_CANDIDATE_003.mp4
+            .kaggle-review/MASTER_CLONE_GATE_08_15_CANDIDATE_003.provenance.json
+            .kaggle-review/C003_verified_manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'C003 only. No paid GPU provisioning, stable overwrite, or automatic promotion.'
+          echo 'Raw identity photos, voice, and source videos remain in the private Kaggle dataset.'
