@@ -1,0 +1,57 @@
+name: C004 Encrypted Transfer Bootstrap
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-transfer-key-bootstrap.yml'
+permissions:
+  contents: read
+jobs:
+  bootstrap-transfer-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate private Kaggle access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          kaggle datasets files "$KAGGLE_PRIVATE_DATASET" >/dev/null
+      - name: Materialize private dataset and create one-time C004 transfer key
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .c004-transfer && mkdir -p .c004-transfer/dataset .c004-transfer/public
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-transfer/dataset --unzip -q
+          kaggle datasets metadata "$KAGGLE_PRIVATE_DATASET" -p .c004-transfer/dataset >/dev/null
+          rm -f .c004-transfer/dataset/.c004_transfer_private.pem
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out .c004-transfer/dataset/.c004_transfer_private.pem
+          chmod 600 .c004-transfer/dataset/.c004_transfer_private.pem
+          openssl pkey -in .c004-transfer/dataset/.c004_transfer_private.pem -pubout -out .c004-transfer/public/c004_transfer_public.pem
+          kaggle datasets version -p .c004-transfer/dataset -m 'Add private C004 encrypted-transfer key only' --dir-mode zip -q
+          echo 'C004_TRANSFER_PRIVATE_KEY_STORED_IN_PRIVATE_KAGGLE_DATASET'
+          echo 'No biometric media uploaded to GitHub.'
+      - name: Upload public encryption key only
+        uses: actions/upload-artifact@v4
+        with:
+          name: c004-transfer-public-key-${{ github.run_id }}
+          path: .c004-transfer/public/c004_transfer_public.pem
+          if-no-files-found: error
+          retention-days: 1
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Only a public encryption key is exported as a GitHub artifact.'
+          echo 'The matching private key stays inside the private Kaggle dataset.'
+          echo 'No raw biometric media, biometric hashes, GPU render, promotion, or stable overwrite occurs.'
