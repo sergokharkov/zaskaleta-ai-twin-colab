@@ -1,0 +1,53 @@
+name: C004 Kaggle Diagnose Failed Kernel
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-kaggle-diagnose.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      FAILED_KERNEL_SLUG: zaskaleta-c004-34123302515
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Kaggle client
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"
+          python -m pip install --quiet 'kaggle>=1.8.0'
+      - name: Read failed C004 kernel diagnostics without resubmitting GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/${FAILED_KERNEL_SLUG}"
+          echo "C004_DIAGNOSTIC_KERNEL=${KERNEL}"
+          echo '--- STATUS ---'
+          kaggle kernels status "$KERNEL" 2>&1 || true
+          echo '--- LOG TAIL ---'
+          rm -f /tmp/c004-kaggle.log
+          kaggle kernels logs "$KERNEL" > /tmp/c004-kaggle.log 2>&1 || true
+          tail -n 220 /tmp/c004-kaggle.log | sed -E 's#(/kaggle/input/)[^ /]+#\1<private-dataset>#g'
+          echo '--- SAFE STATUS OUTPUT ---'
+          rm -rf /tmp/c004-output && mkdir -p /tmp/c004-output
+          kaggle kernels output "$KERNEL" -p /tmp/c004-output --file-pattern '(^|/)zaskaleta_c004_status\.json$' -q || true
+          STATUS="$(find /tmp/c004-output -type f -name 'zaskaleta_c004_status.json' -print -quit)"
+          if [ -n "$STATUS" ]; then
+            python - "$STATUS" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          safe={k:d.get(k) for k in ['schema','candidate_id','state','render_started','render_completed','promotion_allowed','error_type','error','run_token','source_sha'] if k in d}
+          print(json.dumps(safe,ensure_ascii=False,indent=2))
+          PY
+          else
+            echo 'C004_SAFE_STATUS_NOT_FOUND'
+          fi
