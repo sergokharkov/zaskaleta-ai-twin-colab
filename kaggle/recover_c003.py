@@ -181,6 +181,7 @@ def main():
             if status.get('run_token') != token or status.get('source_sha') != source:
                 raise RuntimeError('Wrong run identity')
             if status.get('state') == 'FAILED_CLOSED':
+                command(['kaggle', 'kernels', 'logs', handle], timeout=90, check=False)
                 raise RuntimeError('C003 failed closed: ' + str(status.get('error')))
             if status.get('state') == 'WAITING_FOR_PRIVATE_ASSETS':
                 raise RuntimeError('Private assets unavailable')
