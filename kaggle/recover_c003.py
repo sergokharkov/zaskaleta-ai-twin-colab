@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recover C003 without relying on Kaggle publishing auxiliary source files."""
+"""Recover the exact C003 build; never follow a stale Kaggle kernel."""
 import argparse
 import base64
 import hashlib
@@ -18,11 +18,16 @@ ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE = 'MASTER_CLONE_GATE_08_15_CANDIDATE_003'
 BASE = 'first_gate_alignment/' + CANDIDATE
 SOURCE_FILES = [
-    'kaggle/autopilot_kernel_c003.py', 'kaggle/first_gate_alignment_render.py',
-    'kaggle/auto_prepare.py', 'kaggle/verified_c003_entry.py',
-    'worker/lipsync_musetalk.py', 'worker/voice_mms_openvoice.py',
-    'content/talking_profile_v2.json', 'content/clone_reference_profile.json',
-    'content/master_clone_package.json',
+    'kaggle/recover_c003.py', 'kaggle/recover_c003_readonly.py',
+    'kaggle/verified_c003_entry.py', 'kaggle/autopilot_kernel_c003.py',
+    'kaggle/first_gate_alignment_render.py', 'kaggle/auto_prepare.py',
+    'kaggle/bootstrap.py', 'kaggle/preflight.py', 'kaggle/prepare_models.py',
+    'kaggle/validate_private_assets.py', 'worker/lipsync_musetalk.py',
+    'worker/voice_mms_openvoice.py', 'worker/generate_scene_speech.py',
+    'worker/evaluate_clone_release.py', 'content/talking_profile_v2.json',
+    'content/clone_reference_profile.json', 'content/master_clone_package.json',
+    'content/clone_duration_gate_policy_v1.json', 'content/clone_quality_gate_v1.json',
+    'content/clone_release_policy_v1.json', 'content/identity_view_holdout_v1.json',
 ]
 
 def sha(path):
@@ -41,14 +46,38 @@ def command(args, timeout=120, check=True):
     return p
 
 def build(out, source, token, handle, dataset):
+    if not re.fullmatch(r'[0-9a-f]{40}', source):
+        raise RuntimeError('Invalid pinned source SHA')
+    actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    if actual != source:
+        raise RuntimeError('Checkout does not match requested source SHA')
     out.mkdir(parents=True, exist_ok=True)
     bundle = out / 'source_bundle.zip'
     with bundle.open('wb') as f:
         subprocess.run(['git', 'archive', '--format=zip', source], cwd=ROOT, stdout=f, check=True)
+    # Hash the archived bytes rather than trusting a possibly dirty worktree.
+    source_hashes = {}
+    with zipfile.ZipFile(bundle) as z:
+        if len(z.namelist()) != len(set(z.namelist())):
+            raise RuntimeError('Duplicate source archive member')
+        for member in z.infolist():
+            if member.is_dir():
+                continue
+            path = Path(member.filename)
+            if path.is_absolute() or '..' in path.parts or '\\' in member.filename:
+                raise RuntimeError('Unsafe source archive path')
+            if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                raise RuntimeError('Symlinks are not permitted in the C003 source archive')
+            source_hashes[member.filename] = hashlib.sha256(z.read(member)).hexdigest()
+        missing = set(SOURCE_FILES) - set(source_hashes)
+        if missing:
+            raise RuntimeError('Missing pinned dependencies: ' + ', '.join(sorted(missing)))
+        for name in SOURCE_FILES:
+            if sha(ROOT / name) != source_hashes[name]:
+                raise RuntimeError('Dirty or mismatched source file: ' + name)
     manifest = {
         'run_token': token, 'source_sha': source, 'candidate_id': CANDIDATE,
-        'bundle_sha256': sha(bundle),
-        'source_hashes': {n: sha(ROOT / n) for n in SOURCE_FILES},
+        'bundle_sha256': sha(bundle), 'source_hashes': source_hashes,
     }
     entry = (ROOT / 'kaggle/verified_c003_entry.py').read_bytes()
     payload = io.BytesIO()
@@ -67,8 +96,10 @@ with zipfile.ZipFile(io.BytesIO(base64.b64decode(PAYLOAD))) as z:
     for name in ('source_bundle.zip', 'run_identity.json', 'verified_c003_entry.py'):
         (here / name).write_bytes(z.read(name))
 manifest = json.loads((here / 'run_identity.json').read_text())
-assert hashlib.sha256((here / 'source_bundle.zip').read_bytes()).hexdigest() == manifest['bundle_sha256']
-assert hashlib.sha256((here / 'verified_c003_entry.py').read_bytes()).hexdigest() == EXPECTED_ENTRY_SHA
+if hashlib.sha256((here / 'source_bundle.zip').read_bytes()).hexdigest() != manifest['bundle_sha256']:
+    raise RuntimeError('Source bundle SHA-256 mismatch')
+if hashlib.sha256((here / 'verified_c003_entry.py').read_bytes()).hexdigest() != EXPECTED_ENTRY_SHA:
+    raise RuntimeError('Entrypoint SHA-256 mismatch')
 if os.environ.get('ZASKALETA_PACKAGING_TEST') == '1':
     print('C003_PACKAGE_SELF_TEST_OK', manifest['run_token'], flush=True)
 else:
@@ -83,7 +114,6 @@ else:
         'dataset_sources': [dataset.strip()], 'competition_sources': [], 'kernel_sources': [],
     }
     (out / 'kernel-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
-    # Run the actual submitted code on CPU, stopping before model preparation.
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([sys.executable, str(code)], cwd=tmp,
                        env={**os.environ, 'ZASKALETA_PACKAGING_TEST': '1'},
@@ -164,7 +194,6 @@ def main():
             if code in (401, 403): raise RuntimeError('Kaggle API authentication or permission denied') from exc
             print('Output not yet available:', type(exc).__name__, str(exc)[:200], flush=True)
         if re.search(r'COMPLETE|SUCCESS', message, re.I) and evidence is None:
-            # A completed kernel with no exact evidence is not a successful render.
             command(['kaggle', 'kernels', 'logs', handle], timeout=90, check=False)
             raise RuntimeError('Kernel completed without exact C003 evidence')
         time.sleep(20)
@@ -177,11 +206,30 @@ def main():
     command(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate', '-of', 'json', str(video)], timeout=60)
     import shutil
     shutil.copy2(video, review / (CANDIDATE + '.mp4'))
-    shutil.copy2(provenance, review / (CANDIDATE + '.provenance.json'))
+    private_provenance = json.loads(provenance.read_text(encoding='utf-8'))
+    if private_provenance.get('final_render_sha256') != sha(video):
+        raise RuntimeError('Private provenance does not identify the final MP4')
+    safe_provenance = {
+        'schema': 'zaskaleta-c003-public-review-v1',
+        'candidate_id': CANDIDATE,
+        'source_sha': source,
+        'run_token': token,
+        'final_render_sha256': sha(video),
+        'render_duration_seconds': evidence['render_duration_seconds'],
+        'lipsync_sample_rate': 16000,
+        'final_audio_sample_rate': 24000,
+        'single_component_change': 'audio_alignment',
+        'subjective_identity_review': 'PENDING_MANUAL_REVIEW',
+        'promotion_allowed': False,
+        'auto_promote': False,
+        'stable_release_modified': False,
+    }
+    safe_path = review / (CANDIDATE + '.provenance.json')
+    safe_path.write_text(json.dumps(safe_provenance, indent=2) + chr(10), encoding='utf-8')
     (review / 'C003_verified_manifest.json').write_text(json.dumps({
         'kernel': handle, 'version': version, 'run_token': token, 'source_sha': source,
         'candidate_id': CANDIDATE, 'render_sha256': sha(video),
-        'provenance_sha256': sha(provenance), 'manual_review': 'PENDING_MANUAL_REVIEW',
+        'provenance_sha256': sha(safe_path), 'manual_review': 'PENDING_MANUAL_REVIEW',
         'auto_promote': False,
     }, indent=2) + '\n')
     print('VERIFIED_C003_RENDER', CANDIDATE, sha(video), flush=True)
