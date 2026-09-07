@@ -1,0 +1,46 @@
+{
+  "schema": "zaskaleta-master-clone-self-improvement-policy-v1",
+  "mode": "dry_run_only",
+  "candidate_only": true,
+  "stable_master_auto_modify": false,
+  "auto_promote": false,
+  "automatic_gpu_submission": false,
+  "private_biometric_media_export": false,
+  "manual_identity_review_required": true,
+  "zero_identity_regression_required": true,
+  "required_gates": [
+    "source_approval",
+    "two_complete_cpu_qa_passes",
+    "duplicate_gate",
+    "runtime_guard",
+    "temporal_face_guard",
+    "manual_identity_review"
+  ],
+  "failure_classes": [
+    "orchestration",
+    "private_dataset_propagation",
+    "private_asset_resolution",
+    "model_prepare",
+    "runtime_dependency",
+    "render",
+    "output_retrieval",
+    "quality_regression",
+    "unknown"
+  ],
+  "optimization_objectives": [
+    "reduce_repeated_failures",
+    "increase_render_completion_rate",
+    "preserve_identity",
+    "improve_temporal_stability",
+    "improve_lip_sync",
+    "avoid_duplicate_candidates"
+  ],
+  "hard_rules": {
+    "never_retry_same_known_failure_without_a_recorded_fix": true,
+    "never_replace_stable_master_automatically": true,
+    "never_weaken_identity_or_source_gates": true,
+    "never_export_raw_private_media_or_biometric_hashes": true,
+    "never_auto_submit_paid_gpu": true,
+    "require_manual_review_before_promotion": true
+  }
+}
