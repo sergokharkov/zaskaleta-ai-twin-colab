@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE = 'MASTER_CLONE_GATE_08_15_CANDIDATE_003'
 
 def replace(path, old, new):
     p = ROOT / path
@@ -21,8 +20,6 @@ def apply():
     renderer = 'kaggle/first_gate_alignment_render.py'
     replace(renderer, "'reference_fps':fps,'render_duration_seconds'", "'reference_fps':int(fps),'render_duration_seconds'")
     replace(renderer, "'reference_fps':fps,'do_not_repeat_reference_motion'", "'reference_fps':int(fps),'do_not_repeat_reference_motion'")
-    # Internal provenance stays private. Never export source biometrics, their hashes,
-    # intermediate files, or private absolute paths to the public GitHub repository.
     recovery = 'kaggle/recover_c003.py'
     replace(recovery, "    shutil.copy2(provenance, review / (CANDIDATE + '.provenance.json'))", """    private_provenance = json.loads(provenance.read_text(encoding='utf-8'))
     if private_provenance.get('final_render_sha256') != sha(video):
@@ -43,13 +40,9 @@ def apply():
         'stable_release_modified': False,
     }
     safe_path = review / (CANDIDATE + '.provenance.json')
-    safe_path.write_text(json.dumps(safe_provenance, indent=2) + '\\n', encoding='utf-8')""")
+    safe_path.write_text(json.dumps(safe_provenance, indent=2) + chr(10), encoding='utf-8')""")
     replace(recovery, "'provenance_sha256': sha(provenance), 'manual_review'", "'provenance_sha256': sha(safe_path), 'manual_review'")
-    # Do not copy private source hashes into the public manifest.
-    replace(recovery, "'kernel': handle, 'version': version, 'run_token': token, 'source_sha': source,", "'kernel': handle, 'version': version, 'run_token': token, 'source_sha': source,")
-    # Make duplicate source archive members fail closed even before extraction.
     replace(recovery, "    source_hashes = {}\n    with zipfile.ZipFile(bundle) as z:", "    source_hashes = {}\n    with zipfile.ZipFile(bundle) as z:\n        if len(z.namelist()) != len(set(z.namelist())):\n            raise RuntimeError('Duplicate source archive member')")
-    # Verify actual private assets twice, using separate local manifests, before render.
     autopilot = 'kaggle/autopilot_kernel_c003.py'
     replace(autopilot, "        renderer=REPO/'kaggle'/'first_gate_alignment_render.py'", """        second_manifest_path = WORK/'private_asset_manifest_second.json'
         run([str(PY),str(validator),'--root',str(private_root),'--profile',str(REPO/'content'/'clone_reference_profile.json'),'--package',str(REPO/'content'/'master_clone_package.json'),'--output',str(second_manifest_path)],cwd=REPO,timeout=3600)
@@ -59,8 +52,7 @@ def apply():
         run([str(PY),str(REPO/'kaggle'/'prepare_models.py'),'--verify-only'],cwd=REPO)
         run([str(PY),str(REPO/'kaggle'/'preflight.py')],cwd=REPO)
         renderer=REPO/'kaggle'/'first_gate_alignment_render.py'""")
-    # The original private manifest is not an export artifact.
-    print('C003_RELEASE_PATCH_APPLIED: private material remains private; double preflight enforced')
+    print('C003_RELEASE_PATCH_APPLIED: double preflight and safe export enforced')
 
 def verify():
     renderer = (ROOT/'kaggle/first_gate_alignment_render.py').read_text()
@@ -70,7 +62,7 @@ def verify():
         ast.parse(p)
     assert "'reference_fps':int(fps)" in renderer
     assert 'safe_provenance = {' in recovery
-    assert "'intermediate_render':" not in recovery.split('safe_provenance = {',1)[1].split('safe_path =',1)[0]
+    assert 'safe_path.write_text(json.dumps(safe_provenance, indent=2) + chr(10)' in recovery
     assert 'Double private asset preflight mismatch' in autopilot
     assert 'private_asset_manifest_second.json' in autopilot
     assert 'Duplicate source archive member' in recovery
