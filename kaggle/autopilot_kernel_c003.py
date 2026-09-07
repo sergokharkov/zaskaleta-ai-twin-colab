@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle autopilot entrypoint for MASTER CLONE CANDIDATE_003 alignment challenger."""
+"""Kaggle C003 entrypoint: private assets, pinned source, candidate-only render."""
 from __future__ import annotations
 import json, os, shutil, subprocess, sys, zipfile
 from pathlib import Path
@@ -8,7 +8,8 @@ WORK=Path('/kaggle/working'); INPUT_ROOT=Path('/kaggle/input')
 REPO=WORK/'zaskaleta-ai-twin-colab'; REPO_URL='https://github.com/sergokharkov/zaskaleta-ai-twin-colab.git'
 PY=WORK/'clone311'/'bin'/'python'; STATUS=WORK/'zaskaleta_autopilot_status.json'
 PRIVATE_MANIFEST=WORK/'private_asset_manifest.json'; GATE_DIR=WORK/'first_gate_alignment'
-GATE_EVIDENCE=GATE_DIR/'MASTER_CLONE_GATE_08_15_CANDIDATE_003.evidence.json'
+CANDIDATE='MASTER_CLONE_GATE_08_15_CANDIDATE_003'
+GATE_EVIDENCE=GATE_DIR/(CANDIDATE+'.evidence.json')
 PREFERRED_PRIVATE_ROOT=Path(os.environ.get('ZASKALETA_PRIVATE_ASSET_ROOT','/kaggle/input/zaskaleta-master-clone-private'))
 RUNTIME_PRIVATE_ROOT=WORK/'_runtime_private_assets'
 REQUIRED_MARKERS={'Zaskaleta_AI_Voice_Master.mp3','MASTER_BEHAVIOR_01.mp4','MASTER_BEHAVIOR_02.mp4'}
@@ -41,13 +42,25 @@ def resolve_private_root():
             if not archive.is_file() or not zip_has_required_markers(archive): continue
             if RUNTIME_PRIVATE_ROOT.exists(): shutil.rmtree(RUNTIME_PRIVATE_ROOT)
             RUNTIME_PRIVATE_ROOT.mkdir(parents=True,exist_ok=True)
-            with zipfile.ZipFile(archive) as zf: zf.extractall(RUNTIME_PRIVATE_ROOT)
+            with zipfile.ZipFile(archive) as zf:
+                for member in zf.infolist():
+                    path=Path(member.filename)
+                    if path.is_absolute() or '..' in path.parts or '\\' in member.filename:
+                        raise RuntimeError('Unsafe private asset archive path')
+                zf.extractall(RUNTIME_PRIVATE_ROOT)
             if has_required_markers(RUNTIME_PRIVATE_ROOT): return RUNTIME_PRIVATE_ROOT,'auto_extracted_zip'
     return None,'not_found'
 
 def write_status(private_root=None, **extra):
-    payload={'schema':'zaskaleta-kaggle-autopilot-status-v6','repo':str(REPO),'private_asset_root':str(private_root) if private_root else None,'mounted_input_dirs':mounted_input_dirs(),'auto_promote':False,'paid_gpu_provisioned':False,'raw_biometrics_written_to_github':False,'stable_release_modified':False,**extra}
-    STATUS.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf-8'); print(json.dumps(payload,ensure_ascii=False,indent=2))
+    payload={'schema':'zaskaleta-kaggle-autopilot-status-v6','repo':str(REPO),
+        'private_asset_root':str(private_root) if private_root else None,
+        'mounted_input_dirs':mounted_input_dirs(),'render_completed':False,
+        'first_gate_candidate_id':CANDIDATE, **extra}
+    # Safety fields are authoritative, including for WAITING and FAILED_CLOSED.
+    payload.update(auto_promote=False,promotion_allowed=False,paid_gpu_provisioned=False,
+        raw_biometrics_written_to_github=False,stable_release_modified=False)
+    STATUS.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    print(json.dumps(payload,ensure_ascii=False,indent=2))
 
 def ensure_repo():
     if (REPO/'.git').is_dir():
@@ -72,17 +85,24 @@ def main():
         manifest=json.loads(PRIVATE_MANIFEST.read_text(encoding='utf-8'))
         if manifest.get('validated') is not True: raise RuntimeError('private asset manifest did not validate')
         if manifest.get('auto_promote') is not False or manifest.get('render_started') is not False: raise RuntimeError('private asset validator safety contract weakened')
+        second_manifest_path = WORK/'private_asset_manifest_second.json'
+        run([str(PY),str(validator),'--root',str(private_root),'--profile',str(REPO/'content'/'clone_reference_profile.json'),'--package',str(REPO/'content'/'master_clone_package.json'),'--output',str(second_manifest_path)],cwd=REPO,timeout=3600)
+        second_manifest = json.loads(second_manifest_path.read_text(encoding='utf-8'))
+        if manifest != second_manifest or second_manifest.get('validated') is not True:
+            raise RuntimeError('Double private asset preflight mismatch')
+        run([str(PY),str(REPO/'kaggle'/'prepare_models.py'),'--verify-only'],cwd=REPO)
+        run([str(PY),str(REPO/'kaggle'/'preflight.py')],cwd=REPO)
         renderer=REPO/'kaggle'/'first_gate_alignment_render.py'
         if not renderer.is_file(): raise RuntimeError(f'Missing alignment gate renderer: {renderer}')
         render_attempted=True
         run([str(PY),str(renderer),'--root',str(private_root),'--repo',str(REPO),'--python',str(PY),'--output-dir',str(GATE_DIR)],cwd=REPO,timeout=7200)
         if not GATE_EVIDENCE.is_file(): raise RuntimeError('candidate 003 evidence missing')
         evidence=json.loads(GATE_EVIDENCE.read_text(encoding='utf-8'))
-        if evidence.get('technical_gate_pass') is not True: raise RuntimeError('candidate 003 technical gate failed')
+        if evidence.get('candidate_id')!=CANDIDATE or evidence.get('technical_gate_pass') is not True: raise RuntimeError('candidate 003 technical gate failed')
         if evidence.get('promotion_allowed') is not False or evidence.get('auto_promote') is not False: raise RuntimeError('candidate 003 promotion safety weakened')
         if evidence.get('subjective_identity_review')!='PENDING_MANUAL_REVIEW': raise RuntimeError('candidate 003 bypassed manual identity review')
-        write_status(private_root=private_root,automatic_prepare_complete=True,public_models_verified=True,preflight_passed=True,private_assets_present=True,private_assets_validated=True,private_asset_discovery_mode=discovery_mode,private_asset_identity_count=manifest.get('identity_count'),private_asset_approved_motion_count=manifest.get('approved_motion_count'),render_started=True,render_completed=True,first_gate_seconds=[8,15],first_gate_render_duration_seconds=evidence.get('render_duration_seconds'),first_gate_candidate_id=evidence.get('candidate_id'),baseline_candidate_id=evidence.get('baseline_candidate_id'),single_component_change=evidence.get('single_component_change'),first_gate_output_dir=str(GATE_DIR),subjective_identity_review='PENDING_MANUAL_REVIEW',promotion_allowed=False,state='FIRST_GATE_CANDIDATE_003_READY_FOR_MANUAL_REVIEW'); return 0
+        write_status(private_root=private_root,automatic_prepare_complete=True,public_models_verified=True,preflight_passed=True,private_assets_present=True,private_assets_validated=True,private_asset_discovery_mode=discovery_mode,private_asset_identity_count=manifest.get('identity_count'),private_asset_approved_motion_count=manifest.get('approved_motion_count'),render_started=True,render_completed=True,first_gate_seconds=[8,15],first_gate_render_duration_seconds=evidence.get('render_duration_seconds'),first_gate_candidate_id=evidence.get('candidate_id'),baseline_candidate_id=evidence.get('baseline_candidate_id'),single_component_change=evidence.get('single_component_change'),first_gate_output_dir=str(GATE_DIR),subjective_identity_review='PENDING_MANUAL_REVIEW',state='FIRST_GATE_CANDIDATE_003_READY_FOR_MANUAL_REVIEW'); return 0
     except Exception as exc:
-        write_status(private_root=private_root,automatic_prepare_complete=False,private_assets_validated=False,render_started=render_attempted,render_completed=False,promotion_allowed=False,state='FAILED_CLOSED',error_type=type(exc).__name__,error=str(exc)); return 1
+        write_status(private_root=private_root,automatic_prepare_complete=False,private_assets_validated=False,render_started=render_attempted,render_completed=False,state='FAILED_CLOSED',error_type=type(exc).__name__,error=str(exc)); return 1
 
 if __name__=='__main__': raise SystemExit(main())
