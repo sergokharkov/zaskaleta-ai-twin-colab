@@ -58,6 +58,8 @@ def build(out, source, token, handle, dataset):
     # Hash the archived bytes rather than trusting a possibly dirty worktree.
     source_hashes = {}
     with zipfile.ZipFile(bundle) as z:
+        if len(z.namelist()) != len(set(z.namelist())):
+            raise RuntimeError('Duplicate source archive member')
         for member in z.infolist():
             if member.is_dir():
                 continue
@@ -204,11 +206,30 @@ def main():
     command(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate', '-of', 'json', str(video)], timeout=60)
     import shutil
     shutil.copy2(video, review / (CANDIDATE + '.mp4'))
-    shutil.copy2(provenance, review / (CANDIDATE + '.provenance.json'))
+    private_provenance = json.loads(provenance.read_text(encoding='utf-8'))
+    if private_provenance.get('final_render_sha256') != sha(video):
+        raise RuntimeError('Private provenance does not identify the final MP4')
+    safe_provenance = {
+        'schema': 'zaskaleta-c003-public-review-v1',
+        'candidate_id': CANDIDATE,
+        'source_sha': source,
+        'run_token': token,
+        'final_render_sha256': sha(video),
+        'render_duration_seconds': evidence['render_duration_seconds'],
+        'lipsync_sample_rate': 16000,
+        'final_audio_sample_rate': 24000,
+        'single_component_change': 'audio_alignment',
+        'subjective_identity_review': 'PENDING_MANUAL_REVIEW',
+        'promotion_allowed': False,
+        'auto_promote': False,
+        'stable_release_modified': False,
+    }
+    safe_path = review / (CANDIDATE + '.provenance.json')
+    safe_path.write_text(json.dumps(safe_provenance, indent=2) + chr(10), encoding='utf-8')
     (review / 'C003_verified_manifest.json').write_text(json.dumps({
         'kernel': handle, 'version': version, 'run_token': token, 'source_sha': source,
         'candidate_id': CANDIDATE, 'render_sha256': sha(video),
-        'provenance_sha256': sha(provenance), 'manual_review': 'PENDING_MANUAL_REVIEW',
+        'provenance_sha256': sha(safe_path), 'manual_review': 'PENDING_MANUAL_REVIEW',
         'auto_promote': False,
     }, indent=2) + '\n')
     print('VERIFIED_C003_RENDER', CANDIDATE, sha(video), flush=True)

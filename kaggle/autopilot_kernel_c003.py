@@ -85,6 +85,13 @@ def main():
         manifest=json.loads(PRIVATE_MANIFEST.read_text(encoding='utf-8'))
         if manifest.get('validated') is not True: raise RuntimeError('private asset manifest did not validate')
         if manifest.get('auto_promote') is not False or manifest.get('render_started') is not False: raise RuntimeError('private asset validator safety contract weakened')
+        second_manifest_path = WORK/'private_asset_manifest_second.json'
+        run([str(PY),str(validator),'--root',str(private_root),'--profile',str(REPO/'content'/'clone_reference_profile.json'),'--package',str(REPO/'content'/'master_clone_package.json'),'--output',str(second_manifest_path)],cwd=REPO,timeout=3600)
+        second_manifest = json.loads(second_manifest_path.read_text(encoding='utf-8'))
+        if manifest != second_manifest or second_manifest.get('validated') is not True:
+            raise RuntimeError('Double private asset preflight mismatch')
+        run([str(PY),str(REPO/'kaggle'/'prepare_models.py'),'--verify-only'],cwd=REPO)
+        run([str(PY),str(REPO/'kaggle'/'preflight.py')],cwd=REPO)
         renderer=REPO/'kaggle'/'first_gate_alignment_render.py'
         if not renderer.is_file(): raise RuntimeError(f'Missing alignment gate renderer: {renderer}')
         render_attempted=True
