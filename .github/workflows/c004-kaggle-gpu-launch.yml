@@ -1,4 +1,4 @@
-# Revalidate after nested private source resolver fix
+# Revalidate after writable Kaggle runtime overlay fix
 name: C004 Kaggle GPU Launch
 on:
   workflow_dispatch:
