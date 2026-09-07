@@ -45,18 +45,40 @@ jobs:
               raise SystemExit('Stale or non-main GPU launch blocked')
           if os.environ['GITHUB_RUN_ATTEMPT']!='1':
               raise SystemExit('GPU workflow retries blocked; inspect existing Kaggle job first')
-          runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
-          cpu=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
-               and r['head_branch']=='main' and r['conclusion']=='success'
-               and r.get('head_repository',{}).get('full_name')==repo]
+
           if os.environ['GITHUB_EVENT_NAME']=='workflow_run':
-              cpu=[r for r in cpu if r['id']==event['workflow_run']['id']]
-          if not cpu: raise SystemExit('Successful CPU preflight for exact main commit required')
+              wr=event.get('workflow_run') or {}
+              if wr.get('path')!='.github/workflows/c004-final-cpu-preflight.yml':
+                  raise SystemExit('Unexpected workflow_run source')
+              if wr.get('conclusion')!='success' or wr.get('head_branch')!='main' or wr.get('head_sha')!=head:
+                  raise SystemExit('Successful CPU preflight for exact current main commit required')
+              if (wr.get('head_repository') or {}).get('full_name')!=repo:
+                  raise SystemExit('CPU preflight repository mismatch')
+              cpu_id=str(wr['id'])
+          else:
+              runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
+              cpu=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
+                   and r['head_branch']=='main' and r['conclusion']=='success'
+                   and r.get('head_repository',{}).get('full_name')==repo]
+              if not cpu:
+                  raise SystemExit('Successful CPU preflight for exact main commit required')
+              cpu_id=str(cpu[0]['id'])
+
+          runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
           previous=[r for r in runs if r['path']=='.github/workflows/c004-kaggle-gpu-launch.yml'
                     and str(r['id'])!=os.environ['GITHUB_RUN_ID'] and int(r['id'])<int(os.environ['GITHUB_RUN_ID'])]
-          if previous: raise SystemExit('Prior GPU workflow exists for this commit; inspect it before any resubmission')
+          for prior in previous:
+              jobs=get('actions/runs/'+str(prior['id'])+'/jobs?per_page=100').get('jobs') or []
+              attempted=False
+              for job in jobs:
+                  for step in job.get('steps') or []:
+                      if step.get('name')=='Launch C004 on free Kaggle GPU' and step.get('conclusion') not in (None, 'skipped'):
+                          attempted=True
+              if attempted:
+                  raise SystemExit('Prior GPU submission step already attempted for this commit; inspect Kaggle job first')
+
           with open(os.environ['GITHUB_ENV'],'a') as out:
-              out.write('VERIFIED_CPU_RUN_ID='+str(cpu[0]['id'])+'\n')
+              out.write('VERIFIED_CPU_RUN_ID='+cpu_id+'\n')
           print('C004_EXACT_COMMIT_CPU_SUCCESS_VERIFIED')
           PYCODE
       - uses: actions/checkout@v4
