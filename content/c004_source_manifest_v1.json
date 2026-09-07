@@ -1,7 +1,7 @@
 {
   "schema": "zaskaleta-c004-source-manifest-v1",
   "candidate_id": "MASTER_CLONE_GATE_08_15_CANDIDATE_004",
-  "status": "HOLD_SOURCE_SELECTION",
+  "status": "SELECTED_PENDING_PRIVATE_IMPORT_AND_APPROVAL",
   "gpu_launch_allowed": false,
   "auto_promote": false,
   "stable_clone_immutable": true,
@@ -9,16 +9,23 @@
     "mode": "explicit_approved_segment_only",
     "fallback_to_primary_behavior_allowed": false,
     "fallback_to_c003_allowed": false,
-    "source_segment_id": null,
-    "source_asset_id": null,
-    "source_path": null,
-    "segment_start_seconds": null,
-    "segment_end_seconds": null,
+    "source_segment_id": "53693_motion_02_14",
+    "source_asset_id": "53693.mp4",
+    "source_path": "53693.mp4",
+    "segment_start_seconds": 2.0,
+    "segment_end_seconds": 14.0,
     "approval_record": null,
     "source_authenticity_verified": false,
     "approved_for_motion": false,
     "approved_for_talking": false,
     "identity_anchor_replacement_allowed": false
+  },
+  "selection_scope": {
+    "intended_roles": ["motion", "talking_behavior"],
+    "identity_training_allowed": false,
+    "identity_anchor_use_allowed": false,
+    "selected_segment_duration_seconds": 12.0,
+    "selection_reason": "Continuous upper-body behavior with meaningful gaze, head and expression changes; selected to avoid another reuse of the existing primary/supporting MASTER_BEHAVIOR references."
   },
   "required_preflight": [
     "explicit_source_segment_resolves_uniquely",
@@ -35,5 +42,5 @@
     "biometric_hashes_in_github": false,
     "public_report_contains_only_sanitized_decisions": true
   },
-  "notes": "This manifest records a blocked candidate, not approval. No source is selected until its private provenance and segment-level approval have been verified."
+  "notes": "Selection is not approval. The source must be imported into the private runtime store and explicitly approved there before the manifest may advance to APPROVED_FOR_CPU_QA. GPU remains blocked."
 }
