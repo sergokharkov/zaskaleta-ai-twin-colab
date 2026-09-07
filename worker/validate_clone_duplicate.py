@@ -79,7 +79,9 @@ def compare(candidate, prior, policy):
         if best is None or ratio > best["matching_frame_ratio"]:
             best = {"offset_seconds": offset, "frame_hamming_distances": distances, "matching_frame_ratio": ratio}
     near = abs(cd - pd) <= float(policy["duration_delta_seconds_max"]) and best["matching_frame_ratio"] >= min_ratio
-    contained = duration_ratio >= float(policy["containment_common_duration_ratio_min"]) and best["matching_frame_ratio"] >= containment_ratio
+    full_containment = best["matching_frame_ratio"] >= containment_ratio
+    partial_containment = duration_ratio >= float(policy["containment_common_duration_ratio_min"]) and best["matching_frame_ratio"] >= containment_ratio
+    contained = full_containment or partial_containment
     blocked = exact or near or contained
     return {"prior": str(prior), "exact_sha256_match": exact, "candidate_sha256": c_sha, "prior_sha256": p_sha, "candidate_duration": cd, "prior_duration": pd, "common_duration_ratio": duration_ratio, "best_alignment": best, "near_duplicate": near, "contained_duplicate": contained, "blocked": blocked}
 
