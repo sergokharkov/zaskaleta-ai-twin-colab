@@ -1,3 +1,4 @@
+# Revalidate after nested private source resolver fix
 name: C004 Kaggle GPU Launch
 on:
   workflow_dispatch:
