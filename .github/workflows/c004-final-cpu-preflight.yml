@@ -73,6 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp content/master_clone_package.json .c004-final/work/stable_before.json
           for pass in 1 2; do
             python worker/validate_clone_duplicate.py \
               --candidate ".c004-final/private/${SOURCE}" \
@@ -81,28 +82,75 @@ jobs:
               --prior .c004-final/private/c004_duplicate_priors/C003.mp4 \
               --policy content/clone_duplicate_gate_v1.json \
               --output ".c004-final/work/private_duplicate_${pass}.json"
-            python - "$pass" <<'PY'
-          import json, os, sys
-          from pathlib import Path
-          p=int(sys.argv[1]); cand=os.environ['CANDIDATE']; seg=os.environ['SEGMENT']
-          r=json.load(open(f'.c004-final/work/private_duplicate_{p}.json'))
-          if r.get('decision')!='UNIQUE_ENOUGH' or len(r.get('comparisons') or [])!=3:
-              raise SystemExit('duplicate gate failed')
-          priors=['MASTER_CLONE_GATE_08_15_CANDIDATE_001','MASTER_CLONE_GATE_08_15_CANDIDATE_002','MASTER_CLONE_GATE_08_15_CANDIDATE_003']
-          qa={
-            'candidate_id':cand,'source_segment_id':seg,'decision':'CPU_QA_VERIFIED',
-            'passes':[{'pass':1,'passed':True,'complete':True},{'pass':2,'passed':True,'complete':True}],
-            'duplicate_reports':[{'candidate_id':cand,'source_segment_id':seg,'prior_candidate_id':x,'decision':'UNIQUE_ENOUGH'} for x in priors],
-            'release_path_verified':True,'recovery_path_verified':True,
-            'private_hashes_exported':False
-          }
-          Path('.c004-final/work/qa_draft.json').write_text(json.dumps(qa,indent=2)+'\n')
-          PY
             python worker/validate_c004_source.py \
               --manifest .c004-final/work/runtime_manifest.json \
               --approval .c004-final/private/c004_private_approval.json \
               --storage-root .c004-final/private \
               --output ".c004-final/work/source_${pass}.json"
+            python worker/run_c004_authorized.py \
+              --root . --mydrive .c004-final/private \
+              --manifest .c004-final/work/runtime_manifest.json \
+              --approval .c004-final/private/c004_private_approval.json \
+              --qa .c004-final/work/not-yet-attested.json \
+              --prior-inventory .c004-final/work/priors.json \
+              --output-dir ".c004-final/out/pass_${pass}" --seconds 8 --preflight-only --source-cpu-only
+            test ! -e .c004-final/private/_c004_runtime_only
+            test ! -e ".c004-final/out/pass_${pass}/_c004_candidate_root"
+          done
+          python - <<'PYCODE'
+          import json, sys
+          from pathlib import Path
+          from unittest.mock import patch
+          sys.path.insert(0, 'worker')
+          import run_c004_authorized as runner
+          work=Path('.c004-final/work'); storage=Path('.c004-final/private')
+          stable=(work/'stable_before.json').read_bytes()
+          args=['c004', '--root', '.', '--mydrive', str(storage),
+                '--manifest', str(work/'runtime_manifest.json'),
+                '--approval', str(storage/'c004_private_approval.json'),
+                '--qa', str(work/'not-yet-attested.json'),
+                '--prior-inventory', str(work/'priors.json'),
+                '--output-dir', '.c004-final/out/recovery', '--seconds', '8',
+                '--preflight-only', '--source-cpu-only']
+          # Exercise the real cleanup path after media derivation, without GPU execution.
+          with patch.object(sys, 'argv', args), patch.object(runner.shutil, 'copytree', side_effect=RuntimeError('C004_CPU_INJECTED_FAILURE')):
+              try:
+                  runner.main()
+              except RuntimeError as exc:
+                  if str(exc)!='C004_CPU_INJECTED_FAILURE': raise
+              else:
+                  raise SystemExit('recovery fault was not exercised')
+          if (storage/'_c004_runtime_only').exists() or Path('.c004-final/out/recovery/_c004_candidate_root').exists():
+              raise SystemExit('recovery cleanup failed')
+          if Path('content/master_clone_package.json').read_bytes()!=stable:
+              raise SystemExit('stable package changed')
+          cand='MASTER_CLONE_GATE_08_15_CANDIDATE_004'
+          manifest=json.loads((work/'runtime_manifest.json').read_text())
+          seg=manifest['source_selection']['source_segment_id']
+          passes=[]
+          for p in (1,2):
+              duplicate=json.loads((work/f'private_duplicate_{p}.json').read_text())
+              source=json.loads((work/f'source_{p}.json').read_text())
+              ready=json.loads(Path(f'.c004-final/out/pass_{p}/C004_RUNTIME_READINESS.json').read_text())
+              if duplicate.get('decision')!='UNIQUE_ENOUGH' or len(duplicate.get('comparisons') or [])!=3:
+                  raise SystemExit('duplicate gate failed')
+              if source.get('decision')!='SOURCE_APPROVED_FOR_CPU_QA' or source.get('candidate_id')!=cand or source.get('source_segment_id')!=seg:
+                  raise SystemExit('source gate failed')
+              if ready.get('decision')!='C004_CPU_PREPARATION_VERIFIED' or ready.get('candidate_id')!=cand or ready.get('source_segment_id')!=seg:
+                  raise SystemExit('preparation evidence mismatch')
+              if ready.get('gpu_launch_allowed') is not False or ready.get('stable_clone_modified') is not False or ready.get('fallback_to_c003_allowed') is not False:
+                  raise SystemExit('unsafe preparation evidence')
+              passes.append({'pass':p,'passed':True,'complete':True})
+          priors=json.loads((work/'priors.json').read_text())
+          qa={'candidate_id':cand,'source_segment_id':seg,'decision':'CPU_QA_VERIFIED',
+              'passes':passes,
+              'duplicate_reports':[{'candidate_id':cand,'source_segment_id':seg,'prior_candidate_id':x,'decision':'UNIQUE_ENOUGH'} for x in priors],
+              'release_path_verified':True,'recovery_path_verified':True,
+              'runtime_path_scope':'CPU preparation and injected-failure cleanup; GPU output review still required',
+              'private_hashes_exported':False}
+          (work/'qa_draft.json').write_text(json.dumps(qa,indent=2)+'\n')
+          PYCODE
+          for pass in 1 2; do
             python worker/c004_runtime_guard.py \
               --manifest .c004-final/work/runtime_manifest.json \
               --approval .c004-final/private/c004_private_approval.json \
@@ -116,10 +164,12 @@ jobs:
               --approval .c004-final/private/c004_private_approval.json \
               --qa .c004-final/work/qa_draft.json \
               --prior-inventory .c004-final/work/priors.json \
-              --output-dir ".c004-final/out/pass_${pass}" --seconds 8 --preflight-only
+              --output-dir ".c004-final/out/authorized_${pass}" --seconds 8 --preflight-only
             test ! -e .c004-final/private/_c004_runtime_only
+            test ! -e ".c004-final/out/authorized_${pass}/_c004_candidate_root"
             echo "C004_FINAL_CPU_PASS_${pass}_VERIFIED"
           done
+          cmp content/master_clone_package.json .c004-final/work/stable_before.json
           cp .c004-final/work/qa_draft.json .c004-final/private/c004_cpu_qa.json
           echo C004_FINAL_TWO_PASS_CPU_QA_VERIFIED
       - name: Persist verified QA privately only

@@ -42,7 +42,11 @@ def main():
     ap.add_argument('--voice-preset', default='conversational')
     ap.add_argument('--text', default='Я говорю спокійно і природно. Рухи обличчя та голови мають залишатися живими, стабільними й природними.')
     ap.add_argument('--preflight-only', action='store_true')
+    ap.add_argument('--source-cpu-only', action='store_true',
+                    help='Collect preparation evidence before QA exists; requires --preflight-only')
     args = ap.parse_args()
+    if args.source_cpu_only and not args.preflight_only:
+        ap.error('--source-cpu-only requires --preflight-only; rendering is forbidden')
 
     root = Path(args.root).resolve(strict=True)
     storage = Path(args.mydrive).resolve(strict=True)
@@ -55,10 +59,16 @@ def main():
 
     manifest = json.loads(Path(args.manifest).read_text(encoding='utf-8'))
     approval = json.loads(Path(args.approval).read_text(encoding='utf-8'))
-    qa = json.loads(Path(args.qa).read_text(encoding='utf-8'))
-    priors = json.loads(Path(args.prior_inventory).read_text(encoding='utf-8'))
-    guard = validate_guard(manifest, approval, storage, qa, priors)
-    if guard.get('decision') != 'C004_PREFLIGHT_VERIFIED' or guard.get('candidate_id') != CANDIDATE:
+    if args.source_cpu_only:
+        from validate_c004_source import validate as validate_source
+        guard = validate_source(manifest, approval, storage)
+        expected_decision = 'SOURCE_APPROVED_FOR_CPU_QA'
+    else:
+        qa = json.loads(Path(args.qa).read_text(encoding='utf-8'))
+        priors = json.loads(Path(args.prior_inventory).read_text(encoding='utf-8'))
+        guard = validate_guard(manifest, approval, storage, qa, priors)
+        expected_decision = 'C004_PREFLIGHT_VERIFIED'
+    if guard.get('decision') != expected_decision or guard.get('candidate_id') != CANDIDATE:
         raise SystemExit('C004 source preflight did not verify')
 
     source = Path(guard['source_path']).resolve(strict=True)
@@ -107,7 +117,8 @@ def main():
         ready = {
             'schema': 'zaskaleta-c004-runtime-readiness-v1',
             'candidate_id': CANDIDATE,
-            'decision': 'C004_RUNTIME_READY',
+            'decision': 'C004_CPU_PREPARATION_VERIFIED' if args.source_cpu_only else 'C004_RUNTIME_READY',
+            'gpu_launch_allowed': False,
             'source_segment_id': guard['source_segment_id'],
             'derived_behavior_name': DERIVED_NAME,
             'segment_duration_seconds': segment_duration,

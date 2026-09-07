@@ -83,3 +83,40 @@ jobs:
             echo "C004_CPU_PASS_${pass}_VERIFIED"
           done
           echo C004_SOURCE_GUARD_TWO_PASS_CPU_VERIFIED
+      - name: CPU evidence cannot authorize rendering and recovers from preparation failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          from unittest.mock import patch
+          sys.path.insert(0, 'worker')
+          import run_c004_authorized as runner
+          args=['c004','--root','.','--mydrive','.qa/private',
+                '--manifest','.qa/approved_manifest.json','--approval','.qa/approval.json',
+                '--qa','.qa/nonexistent.json','--prior-inventory','.qa/priors.json',
+                '--output-dir','.qa/out/evidence','--source-cpu-only']
+          with patch.object(sys,'argv',args):
+              try: runner.main()
+              except SystemExit as exc: assert exc.code==2
+              else: raise AssertionError('CPU mode allowed rendering')
+          stable=Path('content/master_clone_package.json').read_bytes()
+          with patch.object(sys,'argv',args+['--preflight-only']):
+              assert runner.main()==0
+          ready=json.loads(Path('.qa/out/evidence/C004_RUNTIME_READINESS.json').read_text())
+          assert ready['decision']=='C004_CPU_PREPARATION_VERIFIED'
+          assert ready['gpu_launch_allowed'] is False
+          with patch.object(sys,'argv',args+['--preflight-only']), patch.object(runner.shutil,'copytree',side_effect=RuntimeError('injected')):
+              try: runner.main()
+              except RuntimeError as exc: assert str(exc)=='injected'
+              else: raise AssertionError('Recovery failure was not injected')
+          assert not Path('.qa/private/_c004_runtime_only').exists()
+          assert not Path('.qa/out/evidence/_c004_candidate_root').exists()
+          assert Path('content/master_clone_package.json').read_bytes()==stable
+          with patch.object(sys,'argv',[x for x in args if x!='--source-cpu-only']+['--preflight-only']):
+              try: runner.main()
+              except FileNotFoundError: pass
+              else: raise AssertionError('Normal entry accepted missing QA')
+          print('C004_CPU_EVIDENCE_BOUNDARY_AND_RECOVERY_VERIFIED')
+          PY
