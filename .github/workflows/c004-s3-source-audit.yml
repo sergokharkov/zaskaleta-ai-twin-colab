@@ -1,0 +1,64 @@
+name: C004 S3 Source Audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-s3-source-audit.yml'
+permissions:
+  contents: read
+jobs:
+  s3-source-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AI_TWIN_STORAGE_BUCKET: ${{ secrets.AI_TWIN_STORAGE_BUCKET }}
+      AI_TWIN_STORAGE_ENDPOINT: ${{ secrets.AI_TWIN_STORAGE_ENDPOINT }}
+      AI_TWIN_STORAGE_REGION: ${{ secrets.AI_TWIN_STORAGE_REGION }}
+      AI_TWIN_STORAGE_ACCESS_KEY_ID: ${{ secrets.AI_TWIN_STORAGE_ACCESS_KEY_ID }}
+      AI_TWIN_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.AI_TWIN_STORAGE_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Metadata-only C004 canonical storage audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in AI_TWIN_STORAGE_BUCKET AI_TWIN_STORAGE_ENDPOINT AI_TWIN_STORAGE_REGION AI_TWIN_STORAGE_ACCESS_KEY_ID AI_TWIN_STORAGE_SECRET_ACCESS_KEY; do
+            test -n "${!v}"
+          done
+          python -m pip install --quiet 'boto3>=1.35,<2'
+          python - <<'PY'
+          import os
+          from pathlib import PurePosixPath
+          import boto3
+          s3=boto3.client('s3',endpoint_url=os.environ['AI_TWIN_STORAGE_ENDPOINT'],region_name=os.environ['AI_TWIN_STORAGE_REGION'],aws_access_key_id=os.environ['AI_TWIN_STORAGE_ACCESS_KEY_ID'],aws_secret_access_key=os.environ['AI_TWIN_STORAGE_SECRET_ACCESS_KEY'])
+          bucket=os.environ['AI_TWIN_STORAGE_BUCKET']
+          wanted={
+              '50380': {'50380.mp4'},
+              '50280': {'50280.mp4','50280(1).mp4'},
+              '53693': {'53693.mp4','53693(1).mp4'},
+              '48025': {'48025.mp4'},
+          }
+          presence={k:False for k in wanted}
+          token=None
+          while True:
+              kw={'Bucket':bucket,'MaxKeys':1000}
+              if token: kw['ContinuationToken']=token
+              page=s3.list_objects_v2(**kw)
+              for obj in page.get('Contents',[]):
+                  base=PurePosixPath(obj.get('Key','')).name
+                  for group,names in wanted.items():
+                      if base in names: presence[group]=True
+              if not page.get('IsTruncated'): break
+              token=page.get('NextContinuationToken')
+          print('C004_S3_AUTH_OK')
+          print('C004_CANDIDATE_GROUP_COUNT=' + str(sum(presence.values())))
+          for key in ('50380','50280','53693','48025'):
+              print(f'C004_{key}_PRESENT=' + str(presence[key]).lower())
+          if not any(presence.values()): raise SystemExit('No registered C004 source candidate exists in canonical S3')
+          PY
+      - name: Safety summary
+        if: always()
+        run: echo 'Metadata-only S3 inventory audit. No private media or hashes exported, no GPU started, no stable clone modified.'
