@@ -341,8 +341,10 @@ def main():
         raise RuntimeError('Raw render provenance hash mismatch before postprocess')
 
     final = out / 'CLONE_V2_TALKING_TEST.mp4'
-    final_filter = 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,format=yuv420p'
-    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', raw, '-vf', final_filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final])
+    # GPU #11 showed stable geometry on all sampled frames but marginally soft face detail.
+    # Improve actual rendered detail before the unchanged temporal guard instead of weakening its threshold.
+    final_filter = 'crop=910:1618:170:210,scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0.0,format=yuv420p'
+    run(['ffmpeg', '-y', '-loglevel', 'error', '-i', raw, '-vf', final_filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final])
 
     final_duration = probe_duration(final)
     if final_duration < seconds - 0.35:
