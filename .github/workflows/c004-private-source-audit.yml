@@ -29,21 +29,24 @@ jobs:
           python -m pip install --quiet 'kaggle>=1.8.0'
           python - <<'PY'
           import os
+          from pathlib import PurePosixPath
           from kaggle.api.kaggle_api_extended import KaggleApi
           api=KaggleApi(); api.authenticate()
-          handle=os.environ['KAGGLE_PRIVATE_DATASET']
-          files=api.dataset_list_files(handle).files or []
-          names={getattr(f,'name','') for f in files}
-          candidates=['50380.mp4','50280.mp4','50280(1).mp4','53693.mp4','53693(1).mp4','48025.mp4']
-          present=[name for name in candidates if name in names]
+          files=api.dataset_list_files(os.environ['KAGGLE_PRIVATE_DATASET']).files or []
+          basenames={PurePosixPath(getattr(f,'name','')).name for f in files}
+          groups={
+              '50380': {'50380.mp4'},
+              '50280': {'50280.mp4','50280(1).mp4'},
+              '53693': {'53693.mp4','53693(1).mp4'},
+              '48025': {'48025.mp4'},
+          }
+          presence={key: bool(names & basenames) for key,names in groups.items()}
           print('C004_PRIVATE_DATASET_AUTH_OK')
-          print('C004_CANDIDATE_COUNT=' + str(len(present)))
-          print('C004_50380_PRESENT=' + str('50380.mp4' in names).lower())
-          print('C004_50280_PRESENT=' + str(('50280.mp4' in names) or ('50280(1).mp4' in names)).lower())
-          print('C004_53693_PRESENT=' + str(('53693.mp4' in names) or ('53693(1).mp4' in names)).lower())
-          print('C004_48025_PRESENT=' + str('48025.mp4' in names).lower())
-          if not present:
-              raise SystemExit('No registered C004 source candidate exists in the private dataset')
+          print('C004_CANDIDATE_GROUP_COUNT=' + str(sum(presence.values())))
+          for key in ('50380','50280','53693','48025'):
+              print(f'C004_{key}_PRESENT=' + str(presence[key]).lower())
+          if not any(presence.values()):
+              raise SystemExit('No registered C004 source candidate basename exists in the private dataset')
           PY
       - name: Safety summary
         if: always()
