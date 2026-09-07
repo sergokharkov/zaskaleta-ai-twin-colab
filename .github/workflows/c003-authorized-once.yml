@@ -1,0 +1,72 @@
+name: C003 Authorized One-Time Render
+on:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - '.github/workflows/c003-authorized-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: zaskaleta-master-clone-gpu
+  cancel-in-progress: false
+jobs:
+  render-and-export:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Authorize one C003 render after two verified preflight passes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 135
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d7e9eeb29dfed55f8ca75477ef740bcbccc16a44
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify exact approved source and Kaggle authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'd7e9eeb29dfed55f8ca75477ef740bcbccc16a44'
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          test -n "$KAGGLE_PRIVATE_DATASET"
+          python -m pip install --quiet 'PyYAML>=6,<7' 'kaggle>=1.8.0' 'kagglehub>=0.3.13'
+          kaggle kernels list --mine --page-size 1 >/dev/null
+          kaggle datasets files "$KAGGLE_PRIVATE_DATASET" >/dev/null
+      - name: Double complete CPU preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            echo "C003_APPROVED_PREFLIGHT_PASS_${pass}"
+            python kaggle/test_c003_release.py
+            python kaggle/c003_release_safety.py --verify
+            python kaggle/audit_c003_source.py
+            python kaggle/recover_c003_readonly.py --dry-run
+          done
+          test "$(git rev-parse HEAD)" = 'd7e9eeb29dfed55f8ca75477ef740bcbccc16a44'
+      - name: Submit exact C003 and retrieve verified output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python kaggle/recover_c003_readonly.py
+      - name: Upload exact safe review files
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-clone-c003-verified-${{ github.run_id }}
+          path: |
+            .kaggle-review/MASTER_CLONE_GATE_08_15_CANDIDATE_003.mp4
+            .kaggle-review/MASTER_CLONE_GATE_08_15_CANDIDATE_003.provenance.json
+            .kaggle-review/C003_verified_manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'One user-authorized free Kaggle C003 attempt. No automatic retry, paid GPU, stable overwrite, or promotion.'
+          echo 'Only the verified MP4 and sanitized review metadata may be uploaded.'
