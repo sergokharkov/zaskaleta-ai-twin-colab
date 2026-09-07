@@ -1,0 +1,43 @@
+name: C003 source-only JSON repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/c003-audit-blockers]
+    paths:
+      - '.github/workflows/c003-json-repair.yml'
+permissions:
+  contents: write
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/fix/c003-audit-blockers'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/c003-audit-blockers
+          fetch-depth: 1
+      - name: Repair only the confirmed quotation defect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path=Path('content/monthly_plan_30_days.json')
+          text=path.read_text(encoding='utf-8')
+          old='Не кожне "ні" — слабкість.'
+          new='Не кожне \\"ні\\" — слабкість.'
+          if text.count(old)!=1:
+              raise RuntimeError('Expected unique JSON quotation defect not found')
+          repaired=text.replace(old,new,1)
+          document=json.loads(repaired)
+          if document.get('series')!='30 днів сили' or len(document.get('days',[]))!=30:
+              raise RuntimeError('Unexpected monthly-plan structure; refusing repair')
+          path.write_text(repaired,encoding='utf-8')
+          print('JSON_REPAIR_VALIDATED: one quotation escape, 30 days preserved')
+          PY
+          git diff --check
+          git add content/monthly_plan_30_days.json
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Fix monthly plan JSON quotation escaping'
+          git push origin HEAD:fix/c003-audit-blockers
