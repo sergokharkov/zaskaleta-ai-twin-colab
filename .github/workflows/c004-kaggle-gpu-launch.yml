@@ -1,10 +1,22 @@
 name: C004 Kaggle GPU Launch
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ['C004 Final CPU Preflight']
+    types: [completed]
+    branches: [main]
+concurrency:
+  group: c004-kaggle-gpu
+  cancel-in-progress: false
 permissions:
   contents: read
+  actions: read
 jobs:
   launch-c004:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -13,6 +25,40 @@ jobs:
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
       CANDIDATE: MASTER_CLONE_GATE_08_15_CANDIDATE_004
     steps:
+      - name: Require successful CPU run on current main and prevent repeated GPU submissions
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYCODE'
+          import json, os, urllib.request
+          repo=os.environ['GITHUB_REPOSITORY']
+          def get(path):
+              request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+                  headers={'Authorization':'Bearer '+os.environ['GH_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response:
+                  return json.load(response)
+          event=json.load(open(os.environ['GITHUB_EVENT_PATH']))
+          head=get('branches/main')['commit']['sha']
+          if os.environ['GITHUB_SHA']!=head or os.environ['GITHUB_REF']!='refs/heads/main':
+              raise SystemExit('Stale or non-main GPU launch blocked')
+          if os.environ['GITHUB_RUN_ATTEMPT']!='1':
+              raise SystemExit('GPU workflow retries blocked; inspect existing Kaggle job first')
+          runs=get('actions/runs?head_sha='+head+'&per_page=100')['workflow_runs']
+          cpu=[r for r in runs if r['path']=='.github/workflows/c004-final-cpu-preflight.yml'
+               and r['head_branch']=='main' and r['conclusion']=='success'
+               and r.get('head_repository',{}).get('full_name')==repo]
+          if os.environ['GITHUB_EVENT_NAME']=='workflow_run':
+              cpu=[r for r in cpu if r['id']==event['workflow_run']['id']]
+          if not cpu: raise SystemExit('Successful CPU preflight for exact main commit required')
+          previous=[r for r in runs if r['path']=='.github/workflows/c004-kaggle-gpu-launch.yml'
+                    and str(r['id'])!=os.environ['GITHUB_RUN_ID'] and int(r['id'])<int(os.environ['GITHUB_RUN_ID'])]
+          if previous: raise SystemExit('Prior GPU workflow exists for this commit; inspect it before any resubmission')
+          with open(os.environ['GITHUB_ENV'],'a') as out:
+              out.write('VERIFIED_CPU_RUN_ID='+str(cpu[0]['id'])+'\n')
+          print('C004_EXACT_COMMIT_CPU_SUCCESS_VERIFIED')
+          PYCODE
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -35,7 +81,7 @@ jobs:
           test -f .c004-launch-private/c004_cpu_qa.json
           test -f .c004-launch-private/C004_SOURCE_50380_FACE_MOTION_8_25_CROPPED.mp4
           python - <<'PY'
-          import json
+          import json, os
           a=json.load(open('.c004-launch-private/c004_private_approval.json'))
           q=json.load(open('.c004-launch-private/c004_cpu_qa.json'))
           cand='MASTER_CLONE_GATE_08_15_CANDIDATE_004'; seg='50380_face_motion_25_32_5_stretched_8_24'
@@ -45,6 +91,8 @@ jobs:
               raise SystemExit('C004 approval scope mismatch')
           if q.get('candidate_id')!=cand or q.get('source_segment_id')!=seg or q.get('decision')!='CPU_QA_VERIFIED':
               raise SystemExit('C004 final CPU QA missing')
+          if q.get('source_sha')!=os.environ['GITHUB_SHA'] or str(q.get('cpu_run_id'))!=os.environ['VERIFIED_CPU_RUN_ID']:
+              raise SystemExit('Private QA is not bound to the successful CPU run and exact source commit')
           passes=q.get('passes') or []
           if len(passes)!=2 or not all(p.get('passed') is True and p.get('complete') is True for p in passes):
               raise SystemExit('C004 two complete CPU passes missing')
@@ -118,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           KERNEL="${KAGGLE_USERNAME}/zaskaleta-c004-${GITHUB_RUN_ID}"
-          timeout 6600 kaggle kernels logs "$KERNEL" --follow --interval 15 || rc=$?
+          timeout 6600 kaggle kernels logs "$KERNEL" --follow --interval 15 > /tmp/c004-private-kernel.log 2>&1 || rc=$?
           rc=${rc:-0}
           [ "$rc" -ne 124 ] || { echo 'C004 Kaggle render timed out'; exit 1; }
           status_out="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
@@ -141,8 +189,10 @@ jobs:
           done
           test -n "${VIDEO:-}"; test -n "${STATUS:-}"
           python - "$STATUS" <<'PY'
-          import json,sys
+          import json,sys,os
           d=json.load(open(sys.argv[1]))
+          assert d.get('source_sha')==os.environ['GITHUB_SHA']
+          assert d.get('run_token')==os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
           assert d.get('candidate_id')=='MASTER_CLONE_GATE_08_15_CANDIDATE_004'
           assert d.get('state')=='C004_RENDER_READY_FOR_MANUAL_REVIEW'
           assert d.get('render_completed') is True

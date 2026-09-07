@@ -1,5 +1,10 @@
 name: C004 Final CPU Preflight
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c004-final-cpu-preflight.yml'
+      - '.github/workflows/c004-kaggle-gpu-launch.yml'
   workflow_dispatch:
     inputs:
       confirm_reviewed_source:
@@ -7,6 +12,9 @@ on:
         type: boolean
         required: true
         default: false
+concurrency:
+  group: c004-private-cpu-qa
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -166,7 +174,7 @@ jobs:
             test ! -e ".c004-final/out/pass_${pass}/_c004_candidate_root"
           done
           python - <<'PYCODE'
-          import json, sys
+          import json, os, sys
           from pathlib import Path
           from unittest.mock import patch
           sys.path.insert(0, 'worker')
@@ -211,6 +219,7 @@ jobs:
               passes.append({'pass':p,'passed':True,'complete':True})
           priors=json.loads((work/'priors.json').read_text())
           qa={'candidate_id':cand,'source_segment_id':seg,'decision':'CPU_QA_VERIFIED',
+              'source_sha':os.environ['GITHUB_SHA'],'cpu_run_id':os.environ['GITHUB_RUN_ID'],
               'passes':passes,
               'duplicate_reports':[{'candidate_id':cand,'source_segment_id':seg,'prior_candidate_id':x,'decision':'UNIQUE_ENOUGH'} for x in priors],
               'release_path_verified':True,'recovery_path_verified':True,
