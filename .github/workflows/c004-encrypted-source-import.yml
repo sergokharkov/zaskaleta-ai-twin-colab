@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install media verification tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Download current private Kaggle dataset
         shell: bash
         run: |
