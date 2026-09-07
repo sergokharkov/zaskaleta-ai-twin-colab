@@ -1,4 +1,4 @@
-# Revalidate after writable Kaggle runtime overlay fix
+# Revalidate after OpenVoice constructor compatibility fix
 name: C004 Kaggle GPU Launch
 on:
   workflow_dispatch:
@@ -152,7 +152,8 @@ jobs:
           critical=[
             'content/c004_source_manifest_v1.json','content/clone_duplicate_gate_v1.json',
             'worker/validate_c004_source.py','worker/c004_runtime_guard.py',
-            'worker/run_c004_authorized.py','worker/run_clone_v2_test.py','kaggle/autopilot_kernel_c004.py']
+            'worker/run_c004_authorized.py','worker/run_clone_v2_test.py','worker/generate_scene_speech.py',
+            'kaggle/autopilot_kernel_c004.py']
           identity={
             'schema':'zaskaleta-c004-run-identity-v1','run_token':os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],
             'source_sha':source_sha,'candidate_id':os.environ['CANDIDATE'],'bundle_sha256':sha('.kaggle-c004/source_bundle.zip'),
