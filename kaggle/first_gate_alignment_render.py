@@ -67,6 +67,12 @@ def enforce_reference_policy(meta, target, align):
         raise RuntimeError('Approved motion reference is shorter than speech; repetition is forbidden')
     return fps
 
+def enforce_render_fps(meta, approved_fps, tolerance):
+    render_fps = Fraction(video_stream(meta)['avg_frame_rate'])
+    if render_fps <= 0 or abs(render_fps - approved_fps) > tolerance:
+        raise RuntimeError(f'MuseTalk FPS {render_fps} differs from approved reference {approved_fps} beyond tolerance {tolerance}')
+    return render_fps
+
 def validate_final(meta, audio_duration, final_sr, fps, intermediate):
     duration = duration_seconds(meta)
     video = video_stream(meta)
@@ -138,6 +144,7 @@ def main():
     target = max(8.25, raw_duration)
     pad = max(0.0, target - raw_duration)
     fps = enforce_reference_policy(motion_meta, target, align)
+    fps_tolerance = Fraction(str(align.get('reference_fps_tolerance', 0)))
     for rate, destination in ((lip_sr, lipsync_audio), (final_sr, final_audio)):
         run(['ffmpeg','-y','-i',str(raw_audio),'-af',f'apad=pad_dur={pad:.3f}',
              '-t',f'{target:.3f}','-ac','1','-ar',str(rate),str(destination)],timeout=300)
@@ -150,8 +157,7 @@ def main():
          '--output',str(musetalk_render),'--provenance-output',str(intermediate_provenance),
          '--candidate-id',CANDIDATE],cwd=repo,timeout=7200)
     intermediate_meta = probe(musetalk_render)
-    if Fraction(video_stream(intermediate_meta)['avg_frame_rate']) != fps:
-        raise RuntimeError('MuseTalk changed approved reference FPS')
+    render_fps = enforce_render_fps(intermediate_meta, fps, fps_tolerance)
     if duration_seconds(intermediate_meta) + 0.04 < final_audio_duration:
         raise RuntimeError('MuseTalk output is too short; refusing to truncate speech')
     # Copy the encoded video frames and replace only the audio stream.
@@ -159,7 +165,7 @@ def main():
          '-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac',
          '-ar',str(final_sr),'-ac','1','-shortest',str(render)],timeout=600)
     render_meta = probe(render)
-    render_duration = validate_final(render_meta, final_audio_duration, final_sr, fps, intermediate_meta)
+    render_duration = validate_final(render_meta, final_audio_duration, final_sr, render_fps, intermediate_meta)
     # Provenance describes the final remuxed artifact, not the intermediate MP4.
     intermediate = json.loads(intermediate_provenance.read_text(encoding='utf-8'))
     if intermediate.get('output',{}).get('sha256') != sha256_file(musetalk_render):
@@ -177,7 +183,9 @@ def main():
             'lipsync_16k_sha256':sha256_file(lipsync_audio),
             'final_24k_sha256':sha256_file(final_audio)},
         'motion_reference_sha256':sha256_file(motion),
-        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),'render_duration_seconds':round(render_duration,3),
+        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),
+        'render_fps':round(float(render_fps),6),'render_fps_rational':str(render_fps),
+        'reference_fps_tolerance':float(fps_tolerance),'render_duration_seconds':round(render_duration,3),
         'final_audio_sample_rate':final_sr,'lipsync_sample_rate':lip_sr,
         'pad_end_only':True,'do_not_repeat_reference_motion':True,
         'subjective_identity_review':'PENDING_MANUAL_REVIEW',
@@ -190,7 +198,9 @@ def main():
         'gate':'gate_08_15','gate_range_seconds':[8,15], 'technical_gate_pass':True,
         'single_component_change':'audio_alignment','motion_reference_unchanged':motion_name,
         'lipsync_sample_rate':lip_sr,'final_audio_sample_rate':final_sr,'pad_end_only':True,
-        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),'do_not_repeat_reference_motion':True,
+        'reference_fps':round(float(fps),6),'reference_fps_rational':str(fps),
+        'render_fps':round(float(render_fps),6),'render_fps_rational':str(render_fps),
+        'reference_fps_tolerance':float(fps_tolerance),'do_not_repeat_reference_motion':True,
         'render_duration_seconds':round(render_duration,3),'render_sha256':final_hash,
         'provenance_sha256':sha256_file(provenance),
         'subjective_identity_review':'PENDING_MANUAL_REVIEW','lip_sync_review':'PENDING_MANUAL_REVIEW',

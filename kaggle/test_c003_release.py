@@ -50,6 +50,11 @@ class C003Contracts(unittest.TestCase):
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(bad, 10.0, policy)
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(meta, 13.0, policy)
         with self.assertRaises(RuntimeError): renderer.enforce_reference_policy(meta, 10.0, {**policy, 'do_not_repeat_reference_motion': False})
+        self.assertEqual(renderer.enforce_render_fps(
+            {'streams':[{'codec_type':'video','avg_frame_rate':'30/1'}]}, Fraction(exact_fps), Fraction('0.1')), Fraction(30,1))
+        with self.assertRaises(RuntimeError):
+            renderer.enforce_render_fps(
+                {'streams':[{'codec_type':'video','avg_frame_rate':'25/1'}]}, Fraction(exact_fps), Fraction('0.1'))
 
     def test_final_audio_and_video_timing(self):
         video = {'codec_type': 'video', 'codec_name': 'h264', 'avg_frame_rate': '25/1', 'width': 1080, 'height': 1920}
