@@ -34,7 +34,12 @@ jobs:
           set -euo pipefail
           rm -rf .c004-transfer && mkdir -p .c004-transfer/dataset .c004-transfer/public
           kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c004-transfer/dataset --unzip -q
-          kaggle datasets metadata "$KAGGLE_PRIVATE_DATASET" -p .c004-transfer/dataset >/dev/null
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          ref=os.environ['KAGGLE_PRIVATE_DATASET'].strip()
+          Path('.c004-transfer/dataset/dataset-metadata.json').write_text(json.dumps({'id':ref})+'\n', encoding='utf-8')
+          PY
           rm -f .c004-transfer/dataset/.c004_transfer_private.pem
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out .c004-transfer/dataset/.c004_transfer_private.pem
           chmod 600 .c004-transfer/dataset/.c004_transfer_private.pem
