@@ -1,10 +1,6 @@
 # Revalidate after C004 face-detail postprocess fix; temporal thresholds remain unchanged
 name: C004 Kaggle GPU Launch
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/c004-kaggle-gpu-launch.yml'
   workflow_dispatch:
   workflow_run:
     workflows: ['C004 Final CPU Preflight']
@@ -19,7 +15,6 @@ permissions:
 jobs:
   launch-c004:
     if: >-
-      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
