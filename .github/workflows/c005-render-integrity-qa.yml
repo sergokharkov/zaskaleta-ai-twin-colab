@@ -1,0 +1,98 @@
+name: C005 Render Integrity QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/validate_c005_render_output.py'
+      - '.github/workflows/c005-render-integrity-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build deterministic probe fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qa
+          cat > qa/healthy.json <<'JSON'
+          {
+            "streams": [
+              {"codec_type":"video","codec_name":"h264","duration":"8.000000","avg_frame_rate":"25/1","nb_read_frames":"200","width":1080,"height":1920},
+              {"codec_type":"audio","codec_name":"aac","duration":"8.020000"}
+            ],
+            "format":{"duration":"8.020000"}
+          }
+          JSON
+          cat > qa/c004_like_broken.json <<'JSON'
+          {
+            "streams": [
+              {"codec_type":"video","codec_name":"h264","duration":"1.920000","avg_frame_rate":"25/1","nb_read_frames":"48","width":1080,"height":1920},
+              {"codec_type":"audio","codec_name":"aac","duration":"8.000000"}
+            ],
+            "format":{"duration":"8.000000"}
+          }
+          JSON
+
+      - name: Healthy fixture must pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          python worker/validate_c005_render_output.py \
+            --probe-json qa/healthy.json \
+            --output qa/healthy-result.json
+          python - <<'PY'
+          import json
+          d=json.load(open('qa/healthy-result.json'))
+          assert d['decision']=='C005_RENDER_STREAM_INTEGRITY_PASS', d
+          assert d['promotion_allowed'] is False
+          assert d['stable_release_modified'] is False
+          print('HEALTHY_FIXTURE_PASS')
+          PY
+
+      - name: C004-like truncated video must fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python worker/validate_c005_render_output.py \
+            --probe-json qa/c004_like_broken.json \
+            --output qa/c004-like-result.json
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo 'Broken C004-like fixture incorrectly passed'
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          d=json.load(open('qa/c004-like-result.json'))
+          assert d['decision']=='C005_RENDER_STREAM_INTEGRITY_FAIL', d
+          assert 'video_stream_too_short' in d['error'] or 'duration_mismatch' in d['error'], d
+          assert d['promotion_allowed'] is False
+          print('C004_LIKE_DEFECT_BLOCKED')
+          PY
+
+      - name: Upload sanitized QA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: c005-render-integrity-qa-${{ github.run_id }}
+          path: |
+            qa/healthy-result.json
+            qa/c004-like-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        run: echo 'Regression QA only. No private media, no Kaggle launch, no GPU, no release promotion.'
