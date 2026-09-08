@@ -23,16 +23,16 @@ jobs:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
       CANDIDATE: MASTER_CLONE_CANDIDATE_005
-      PART_000: 1cqGejlDkVWFxdCRfmxrIEvyHW9NTSjA6
-      PART_001: 1RLhD8r04esKp8ICr_uAWfnKE-zDUUfYI
-      PART_002: 10WzWZykck3ii8-T6VINYWa7f3tRhhZQy
-      PART_003: 12-Jgk_OS3gRuUyKqQxZBmqml-GaEzWJO
-      PART_004: 1Vg40ZJ0hNWvHnb-Qpf0WXedf83dHb7yZ
-      PART_005: 11iJbPIvz5x6ewqWELXSTpF_lymSbNQt-
-      PART_006: 1d5OL_Uxx4SdODr8WZEJcXIbqE9cIQtn6
-      PART_007: 1hlY-TYt__DEaaicEspfd_V1Rl4v9WXUz
-      ENVELOPE_ID: 14WW3mwrRYsroduN_LMa6vYRtRfzGJit-
-      CHUNK_MANIFEST_ID: 1_EJqzE0SclpuE41lHPCxMAnj8PO8LiZF
+      PART_000: 1gZlXEiyuR2DsajFJLvQ7vgrHmxNrjf-4
+      PART_001: 1CIgG_URv5o3XA6PE9u7Nco68SXWBFw-k
+      PART_002: 1X3azOXGVTx-rUN42WnmTDL6ZmzBURHJe
+      PART_003: 1ofptlXfhMx5z_PR4LM9MERdRY_SCjpEK
+      PART_004: 109wrbXhef1AW4Vz_iEVrS5pswbogSqZa
+      PART_005: 1kCqOaoEkglSMQl888r2wgR9pP-ByQlol
+      PART_006: 1-ocPtrIPIUYmJHX4Ss8qudQsQM1SvHtp
+      PART_007: 16RmpHJpqJ0fW-XTglKJqsP05Y7YkelYQ
+      ENVELOPE_ID: 1mgO4TM18U5Tt9qLC6R_Apc3hY8FcuEyv
+      CHUNK_MANIFEST_ID: 1F7kLTQbfQG_FNmC-9x20x-WPdTqhWy44
     steps:
       - uses: actions/checkout@v4
         with:
