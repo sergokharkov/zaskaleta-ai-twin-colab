@@ -1,0 +1,68 @@
+name: C005 Reference Manifest QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/c005_reference_manifest_v1.json'
+      - 'worker/validate_c005_reference_manifest.py'
+      - '.github/workflows/c005-reference-manifest-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c005-reference-manifest-qa
+  cancel-in-progress: true
+
+jobs:
+  validate-c005-reference-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate C005 manifest fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python worker/validate_c005_reference_manifest.py \
+            --manifest content/c005_reference_manifest_v1.json \
+            --output c005-manifest-validation.json
+
+      - name: Assert GPU remains blocked before private QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('c005-manifest-validation.json')
+          data = json.loads(p.read_text(encoding='utf-8'))
+          if data.get('decision') != 'C005_REFERENCE_MANIFEST_VALID':
+              raise SystemExit('C005 manifest validation did not pass')
+          if data.get('gpu_launch_allowed') is not False:
+              raise SystemExit('C005 GPU unexpectedly enabled before private QA')
+          if data.get('stable_release_modified') is not False:
+              raise SystemExit('Stable release mutation detected')
+          if data.get('next_stage') != 'PRIVATE_ASSET_IMPORT_QA':
+              raise SystemExit('Unexpected C005 next stage')
+          print('C005_REFERENCE_MANIFEST_QA_PASS')
+          PY
+
+      - name: Upload sanitized QA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: c005-reference-manifest-qa-${{ github.run_id }}
+          path: c005-manifest-validation.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Manifest QA only. No private media upload, Kaggle kernel launch, GPU submission, or stable promotion occurs here.'
