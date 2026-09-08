@@ -1,0 +1,209 @@
+name: C005 Encrypted Reference Import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-encrypted-reference-import.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c005-private-reference-import
+  cancel-in-progress: false
+
+jobs:
+  import-private-references:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      CANDIDATE: MASTER_CLONE_CANDIDATE_005
+      PART_000: 1cqGejlDkVWFxdCRfmxrIEvyHW9NTSjA6
+      PART_001: 1RLhD8r04esKp8ICr_uAWfnKE-zDUUfYI
+      PART_002: 10WzWZykck3ii8-T6VINYWa7f3tRhhZQy
+      PART_003: 12-Jgk_OS3gRuUyKqQxZBmqml-GaEzWJO
+      PART_004: 1Vg40ZJ0hNWvHnb-Qpf0WXedf83dHb7yZ
+      PART_005: 11iJbPIvz5x6ewqWELXSTpF_lymSbNQt-
+      PART_006: 1d5OL_Uxx4SdODr8WZEJcXIbqE9cIQtn6
+      PART_007: 1hlY-TYt__DEaaicEspfd_V1Rl4v9WXUz
+      ENVELOPE_ID: 14WW3mwrRYsroduN_LMa6vYRtRfzGJit-
+      CHUNK_MANIFEST_ID: 1_EJqzE0SclpuE41lHPCxMAnj8PO8LiZF
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install private import dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet 'kaggle>=1.8.0' 'gdown>=5,<6'
+
+      - name: Download current private Kaggle dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c005-import
+          mkdir -p .c005-import/dataset .c005-import/transfer .c005-import/extracted
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c005-import/dataset --unzip -q
+          test -f .c005-import/dataset/.c004_transfer_private.pem || { echo 'Private transfer key missing'; exit 12; }
+
+      - name: Download encrypted C005 chunks only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ids=("$PART_000" "$PART_001" "$PART_002" "$PART_003" "$PART_004" "$PART_005" "$PART_006" "$PART_007")
+          for i in $(seq 0 7); do
+            printf -v idx '%03d' "$i"
+            python -m gdown "https://drive.google.com/uc?id=${ids[$i]}" -O ".c005-import/transfer/C005_REFERENCES.enc.part-${idx}"
+          done
+          python -m gdown "https://drive.google.com/uc?id=${ENVELOPE_ID}" -O .c005-import/transfer/C005_KEY.envelope
+          python -m gdown "https://drive.google.com/uc?id=${CHUNK_MANIFEST_ID}" -O .c005-import/transfer/C005_TRANSFER_CHUNKS.json
+          test -s .c005-import/transfer/C005_KEY.envelope
+          test -s .c005-import/transfer/C005_TRANSFER_CHUNKS.json
+
+      - name: Verify ciphertext chunks and reassemble
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root=Path('.c005-import/transfer')
+          m=json.loads((root/'C005_TRANSFER_CHUNKS.json').read_text())
+          assert m.get('schema')=='zaskaleta-c005-encrypted-reference-transfer-chunked-v1'
+          assert m.get('candidate_id')=='MASTER_CLONE_CANDIDATE_005'
+          assert m.get('plaintext_exported_to_github') is False
+          assert m.get('biometric_hash_exported') is False
+          parts=m.get('parts') or []
+          assert len(parts)==8
+          out=root/'C005_REFERENCES.enc'
+          with out.open('wb') as dst:
+              for item in parts:
+                  p=root/item['name']
+                  assert p.is_file() and p.stat().st_size==int(item['size_bytes'])
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+                  assert h.hexdigest()==item['sha256']
+                  with p.open('rb') as f:
+                      for c in iter(lambda:f.read(1024*1024),b''): dst.write(c)
+          print('C005_CIPHERTEXT_REASSEMBLED_AND_VERIFIED')
+          PY
+
+      - name: Decrypt inside private runner and verify private provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -decrypt \
+            -inkey .c005-import/dataset/.c004_transfer_private.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in .c005-import/transfer/C005_KEY.envelope \
+            -out .c005-import/transfer/key_iv.bin
+          python - <<'PY'
+          from pathlib import Path
+          b=Path('.c005-import/transfer/key_iv.bin').read_bytes()
+          if len(b)!=48: raise SystemExit('invalid transfer key material')
+          Path('.c005-import/transfer/key.hex').write_text(b[:32].hex())
+          Path('.c005-import/transfer/iv.hex').write_text(b[32:].hex())
+          PY
+          KEYHEX=$(cat .c005-import/transfer/key.hex)
+          IVHEX=$(cat .c005-import/transfer/iv.hex)
+          openssl enc -d -aes-256-cbc -K "$KEYHEX" -iv "$IVHEX" \
+            -in .c005-import/transfer/C005_REFERENCES.enc \
+            -out .c005-import/transfer/C005_REFERENCES.tar
+          tar -xf .c005-import/transfer/C005_REFERENCES.tar -C .c005-import/extracted
+          rm -f .c005-import/transfer/key_iv.bin .c005-import/transfer/key.hex .c005-import/transfer/iv.hex
+          python - <<'PY'
+          import hashlib, json, subprocess
+          from pathlib import Path
+          root=Path('.c005-import/extracted')
+          m=json.loads((root/'private_manifest.json').read_text())
+          assert m.get('schema')=='zaskaleta-c005-private-reference-bundle-v1'
+          assert m.get('candidate_id')=='MASTER_CLONE_CANDIDATE_005'
+          assert m.get('raw_biometric_media_public') is False
+          assert m.get('hashes_public') is False
+          assets=m.get('assets') or []
+          expected={'53665.jpg','53666.jpg','53668.jpg','53669.jpg','54193.mp4','54194.mp4','54197.mp4'}
+          assert {a['filename'] for a in assets}==expected
+          for a in assets:
+              p=root/a['filename']
+              assert p.is_file() and p.stat().st_size==int(a['size_bytes'])
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+              assert h.hexdigest()==a['sha256']
+          for name in ['53665.jpg','53666.jpg','53668.jpg','53669.jpg']:
+              subprocess.run(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=width,height','-of','json',str(root/name)],check=True,capture_output=True,text=True)
+          for name,min_d,max_d in [('54193.mp4',15,17),('54194.mp4',35,38),('54197.mp4',117,121)]:
+              raw=subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=duration,width,height','-of','json',str(root/name)],text=True)
+              d=json.loads(raw)['streams'][0]
+              dur=float(d['duration'])
+              assert min_d <= dur <= max_d
+              assert int(d['width'])==1920 and int(d['height'])==1080
+          print('C005_PRIVATE_REFERENCE_PROVENANCE_AND_MEDIA_QA_PASS')
+          PY
+
+      - name: Stage C005 references in private dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .c005-import/dataset/C005_REFERENCES
+          mkdir -p .c005-import/dataset/C005_REFERENCES
+          cp .c005-import/extracted/53665.jpg .c005-import/extracted/53666.jpg .c005-import/extracted/53668.jpg .c005-import/extracted/53669.jpg .c005-import/dataset/C005_REFERENCES/
+          cp .c005-import/extracted/54193.mp4 .c005-import/extracted/54194.mp4 .c005-import/extracted/54197.mp4 .c005-import/dataset/C005_REFERENCES/
+          cp .c005-import/extracted/private_manifest.json .c005-import/dataset/C005_REFERENCES/private_manifest.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('.c005-import/dataset/dataset-metadata.json').write_text(json.dumps({'id':os.environ['KAGGLE_PRIVATE_DATASET'].strip()})+'\n')
+          PY
+
+      - name: Version private Kaggle dataset with C005 references
+        shell: bash
+        run: |
+          set -euo pipefail
+          kaggle datasets version -p .c005-import/dataset -m 'Import encrypted C005 identity behavior references privately' --dir-mode zip -q
+          echo 'C005_PRIVATE_REFERENCE_VERSION_SUBMITTED'
+
+      - name: Verify private C005 references are listed
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            listing="$(kaggle datasets files "$KAGGLE_PRIVATE_DATASET" 2>/dev/null || true)"
+            ok=1
+            for n in 53665.jpg 53666.jpg 53668.jpg 53669.jpg 54193.mp4 54194.mp4 54197.mp4 private_manifest.json; do
+              echo "$listing" | grep -F "$n" >/dev/null || ok=0
+            done
+            if [ "$ok" -eq 1 ]; then
+              echo 'C005_PRIVATE_REFERENCES_PRESENT_VERIFIED'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Private dataset did not expose all C005 reference files in time.'
+          exit 13
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Encrypted transport only is stored on Drive.'
+          echo 'Plain C005 biometric media exists only transiently in this runner and in the private Kaggle dataset.'
+          echo 'No private hashes or raw biometric media are uploaded to public GitHub.'
+          echo 'No GPU render, auto-promotion, or stable-release mutation occurs in this workflow.'
