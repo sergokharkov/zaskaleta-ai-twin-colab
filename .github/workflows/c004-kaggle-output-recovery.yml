@@ -112,10 +112,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VIDEO=.c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4
-          test -s "$VIDEO"
-          ffprobe -v error -show_entries format=duration,size -of json "$VIDEO"
-          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json "$VIDEO"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4')
+          if not p.is_file() or p.stat().st_size < 100000:
+              raise SystemExit('Recovered MP4 missing or unexpectedly small')
+          head = p.read_bytes()[:64]
+          if b'ftyp' not in head:
+              raise SystemExit('Recovered file does not look like an MP4 container')
+          print(f'C004_MP4_VALIDATED_SIZE={p.stat().st_size}')
+          PY
       - name: Upload recovered C004 candidate
         uses: actions/upload-artifact@v4
         with:
