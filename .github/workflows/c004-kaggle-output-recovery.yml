@@ -10,7 +10,7 @@ permissions:
 jobs:
   recover-existing-c004:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
@@ -23,9 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Kaggle client
-        run: python -m pip install --quiet 'kaggle>=1.8.0'
-      - name: Recover completed C004 output without new GPU submission
+      - name: Install recovery clients
+        run: python -m pip install --quiet 'kaggle>=1.8.0' 'kagglehub>=0.3.13'
+      - name: Verify completed C004 kernel
         shell: bash
         run: |
           set -euo pipefail
@@ -34,46 +34,88 @@ jobs:
           status_out="$(timeout --signal=TERM --kill-after=10s 60s kaggle kernels status "$KERNEL" 2>&1)"
           echo "$status_out"
           echo "$status_out" | grep -Eqi 'COMPLETE|COMPLETED' || { echo 'Existing C004 kernel is not complete'; exit 1; }
+      - name: Recover exact C004 files using proven notebook output API
+        shell: bash
+        run: |
+          set -euo pipefail
           rm -rf .c004-recovery .c004-export
           mkdir -p .c004-recovery .c004-export
-          success=false
-          for attempt in $(seq 1 12); do
-            rm -rf .c004-recovery
-            mkdir -p .c004-recovery
-            echo "C004_OUTPUT_RECOVERY_ATTEMPT=${attempt}"
-            set +e
-            timeout --signal=TERM --kill-after=15s 90s kaggle kernels output "$KERNEL" -p .c004-recovery -q
-            rc=$?
-            set -e
-            echo "KAGGLE_OUTPUT_EXIT_CODE=${rc}"
-            VIDEO="$(find .c004-recovery -type f -name 'CLONE_V2_TALKING_TEST.mp4' -print -quit)"
-            STATUS="$(find .c004-recovery -type f -name 'zaskaleta_c004_status.json' -print -quit)"
-            if [ "$rc" -eq 0 ] && [ -n "$VIDEO" ] && [ -s "$VIDEO" ] && [ -n "$STATUS" ] && [ -s "$STATUS" ]; then
-              success=true
-              break
-            fi
-            if [ "$attempt" -lt 12 ]; then
-              if [ "$attempt" -le 3 ]; then wait_seconds=30; elif [ "$attempt" -le 6 ]; then wait_seconds=60; else wait_seconds=90; fi
-              sleep "$wait_seconds"
-            fi
-          done
-          [ "$success" = true ] || { echo 'Existing C004 output remained unavailable'; exit 1; }
-          python - "$STATUS" <<'PY'
-          import json, os, sys
-          d=json.load(open(sys.argv[1], encoding='utf-8'))
-          assert d.get('source_sha')==os.environ['SOURCE_SHA']
-          assert d.get('run_token')==os.environ['SOURCE_RUN_TOKEN']
-          assert d.get('candidate_id')==os.environ['CANDIDATE']
-          assert d.get('state')=='C004_RENDER_READY_FOR_MANUAL_REVIEW'
-          assert d.get('render_completed') is True
-          assert d.get('auto_promote') is False
-          assert d.get('stable_release_modified') is False
-          print('C004_EXISTING_RENDER_PROVENANCE_VERIFIED')
+          python - <<'PY'
+          import json, os, time
+          from pathlib import Path
+          import kagglehub
+
+          handle = os.environ['KAGGLE_USERNAME'] + '/zaskaleta-c004-' + os.environ['SOURCE_RUN_ID']
+          root = Path('.c004-recovery')
+          expected = {
+              'source_sha': os.environ['SOURCE_SHA'],
+              'run_token': os.environ['SOURCE_RUN_TOKEN'],
+              'candidate_id': os.environ['CANDIDATE'],
+          }
+
+          def download_exact(path):
+              last = None
+              for attempt in range(1, 9):
+                  print(f'C004_KAGGLEHUB_DOWNLOAD_ATTEMPT={attempt} PATH={path}', flush=True)
+                  try:
+                      p = Path(kagglehub.notebook_output_download(
+                          handle,
+                          path=path,
+                          output_dir=str(root),
+                          force_download=True,
+                      ))
+                      if p.is_dir():
+                          p = p / Path(path).name
+                      if p.is_file() and p.stat().st_size > 0:
+                          print(f'C004_KAGGLEHUB_EXACT_FILE_READY={p}', flush=True)
+                          return p
+                      last = RuntimeError('Downloaded path is missing or empty: ' + str(p))
+                  except Exception as exc:
+                      last = exc
+                      print(f'C004_KAGGLEHUB_ATTEMPT_ERROR={type(exc).__name__}: {exc}', flush=True)
+                  if attempt < 8:
+                      time.sleep(min(30 * attempt, 120))
+              raise RuntimeError(f'Unable to recover exact Kaggle output {path}: {last}')
+
+          status_path = download_exact('zaskaleta_c004_status.json')
+          status = json.loads(status_path.read_text(encoding='utf-8'))
+          for key, value in expected.items():
+              if status.get(key) != value:
+                  raise RuntimeError(f'{key} mismatch: expected {value!r}, got {status.get(key)!r}')
+          if status.get('state') != 'C004_RENDER_READY_FOR_MANUAL_REVIEW':
+              raise RuntimeError('Wrong C004 final state')
+          if status.get('render_completed') is not True:
+              raise RuntimeError('C004 render is not marked complete')
+          if status.get('auto_promote') is not False or status.get('stable_release_modified') is not False:
+              raise RuntimeError('C004 stable-release safety invariant failed')
+
+          video_path = download_exact('CLONE_V2_TALKING_TEST.mp4')
+          out = Path('.c004-export')
+          (out / 'MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4').write_bytes(video_path.read_bytes())
+          safe = {
+              'schema': 'zaskaleta-c004-public-review-v1',
+              'candidate_id': status.get('candidate_id'),
+              'source_sha': status.get('source_sha'),
+              'run_token': status.get('run_token'),
+              'state': status.get('state'),
+              'render_completed': True,
+              'subjective_identity_review': status.get('subjective_identity_review', 'PENDING_MANUAL_REVIEW'),
+              'auto_promote': False,
+              'stable_release_modified': False,
+              'recovered_existing_render': True,
+              'new_gpu_render_started': False,
+          }
+          (out / 'C004_SAFE_STATUS.json').write_text(json.dumps(safe, indent=2) + '\n', encoding='utf-8')
+          print('C004_EXISTING_RENDER_PROVENANCE_VERIFIED', flush=True)
           PY
+      - name: Validate recovered MP4
+        shell: bash
+        run: |
+          set -euo pipefail
+          VIDEO=.c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4
+          test -s "$VIDEO"
           ffprobe -v error -show_entries format=duration,size -of json "$VIDEO"
           ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json "$VIDEO"
-          cp "$VIDEO" .c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4
-          cp "$STATUS" .c004-export/C004_SAFE_STATUS.json
       - name: Upload recovered C004 candidate
         uses: actions/upload-artifact@v4
         with:
@@ -86,4 +128,4 @@ jobs:
         if: always()
         run: |
           echo 'Recovery only: no Kaggle kernel push and no GPU submission occur in this workflow.'
-          echo 'Stable clone remains unchanged; candidate is exported only for manual review.'
+          echo 'C004 renderer is frozen at SOURCE_SHA; stable clone remains unchanged.'
