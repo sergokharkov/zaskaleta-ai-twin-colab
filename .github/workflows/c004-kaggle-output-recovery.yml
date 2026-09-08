@@ -38,8 +38,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .c004-recovery .c004-export
-          mkdir -p .c004-recovery .c004-export
+          rm -rf .c004-recovery c004-export
+          mkdir -p .c004-recovery c004-export
           python - <<'PY'
           import json, os, time
           from pathlib import Path
@@ -90,7 +90,7 @@ jobs:
               raise RuntimeError('C004 stable-release safety invariant failed')
 
           video_path = download_exact('c004_first_gate/CLONE_V2_TALKING_TEST.mp4')
-          out = Path('.c004-export')
+          out = Path('c004-export')
           (out / 'MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4').write_bytes(video_path.read_bytes())
           safe = {
               'schema': 'zaskaleta-c004-public-review-v1',
@@ -114,7 +114,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          p = Path('.c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4')
+          p = Path('c004-export/MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4')
           if not p.is_file() or p.stat().st_size < 100000:
               raise SystemExit('Recovered MP4 missing or unexpectedly small')
           head = p.read_bytes()[:64]
@@ -126,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: master-clone-c004-recovered-${{ github.run_id }}
-          path: .c004-export/
+          path: c004-export/
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
