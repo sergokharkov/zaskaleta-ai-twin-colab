@@ -89,7 +89,7 @@ jobs:
           if status.get('auto_promote') is not False or status.get('stable_release_modified') is not False:
               raise RuntimeError('C004 stable-release safety invariant failed')
 
-          video_path = download_exact('CLONE_V2_TALKING_TEST.mp4')
+          video_path = download_exact('c004_first_gate/CLONE_V2_TALKING_TEST.mp4')
           out = Path('.c004-export')
           (out / 'MASTER_CLONE_GATE_08_15_CANDIDATE_004.mp4').write_bytes(video_path.read_bytes())
           safe = {
