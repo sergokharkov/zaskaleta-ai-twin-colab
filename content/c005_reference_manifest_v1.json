@@ -1,0 +1,103 @@
+{
+  "schema": "zaskaleta-c005-reference-manifest-v1",
+  "candidate_id": "MASTER_CLONE_CANDIDATE_005",
+  "status": "PREPARED_FOR_PRIVATE_ASSET_IMPORT",
+  "created_date": "2026-09-08",
+  "baseline": {
+    "candidate": "C003",
+    "role": "comparison_only",
+    "stable_release_modified": false,
+    "notes": "C003 remains the visual/talking baseline for regression comparison. It must not be overwritten in place."
+  },
+  "rejected_predecessor": {
+    "candidate": "C004",
+    "status": "REJECTED_FOR_C005_REFERENCE_USE",
+    "reasons": [
+      "manual identity review did not approve the candidate",
+      "visual identity drift versus current real references",
+      "over-strong contrast/sharpening changed apparent facial characteristics",
+      "C004 must not enter identity, training, or approved reference pools"
+    ]
+  },
+  "private_reference_set": {
+    "identity_photos": [
+      {"asset_alias": "C005_IDENTITY_PHOTO_01", "storage": "PRIVATE_ONLY", "approval": "PENDING_PRIVATE_IMPORT_QA"},
+      {"asset_alias": "C005_IDENTITY_PHOTO_02", "storage": "PRIVATE_ONLY", "approval": "PENDING_PRIVATE_IMPORT_QA"},
+      {"asset_alias": "C005_IDENTITY_PHOTO_03", "storage": "PRIVATE_ONLY", "approval": "PENDING_PRIVATE_IMPORT_QA"},
+      {"asset_alias": "C005_IDENTITY_PHOTO_04", "storage": "PRIVATE_ONLY", "approval": "PENDING_PRIVATE_IMPORT_QA"}
+    ],
+    "behavior_videos": [
+      {
+        "asset_alias": "C005_BEHAVIOR_FRONT_16S",
+        "role": ["frontal_identity_holdout", "articulation", "neutral_behavior"],
+        "duration_seconds": 15.996444,
+        "resolution": "1920x1080",
+        "video_codec": "hevc",
+        "fps": 30.0,
+        "storage": "PRIVATE_ONLY",
+        "approval": "PENDING_PRIVATE_IMPORT_QA"
+      },
+      {
+        "asset_alias": "C005_BEHAVIOR_FRONT_36S",
+        "role": ["frontal_identity_holdout", "speech_articulation", "natural_expression"],
+        "duration_seconds": 36.525378,
+        "resolution": "1920x1080",
+        "video_codec": "hevc",
+        "fps": 30.0,
+        "storage": "PRIVATE_ONLY",
+        "approval": "PENDING_PRIVATE_IMPORT_QA"
+      },
+      {
+        "asset_alias": "C005_BEHAVIOR_LONG_119S",
+        "role": ["conversational_delivery", "head_motion", "emotion_reference"],
+        "duration_seconds": 119.134789,
+        "resolution": "1920x1080",
+        "video_codec": "hevc",
+        "fps": 24.930748,
+        "storage": "PRIVATE_ONLY",
+        "approval": "PENDING_PRIVATE_IMPORT_QA",
+        "camera_note": "Use primarily for behavior/motion, not as the sole geometry anchor."
+      }
+    ]
+  },
+  "privacy": {
+    "raw_biometric_media_in_git": false,
+    "private_biometric_hashes_in_git": false,
+    "public_manifest_contains_only_sanitized_aliases_and_non-biometric_technical_metadata": true
+  },
+  "identity_preservation_policy": {
+    "preserve": [
+      "natural facial structure",
+      "natural asymmetry",
+      "eye shape and spacing",
+      "nose geometry",
+      "mouth and jaw geometry",
+      "beard shape density and color",
+      "hairline and hairstyle",
+      "age",
+      "natural skin texture and tone"
+    ],
+    "forbid": [
+      "beautification",
+      "rejuvenation",
+      "face reshaping",
+      "lookalike substitution",
+      "over-aggressive sharpening",
+      "over-aggressive contrast that changes perceived identity",
+      "automatic promotion of generated output into identity references"
+    ]
+  },
+  "c005_gates": {
+    "private_asset_import_verified": false,
+    "source_integrity_verified": false,
+    "two_independent_cpu_qa_passes": false,
+    "identity_holdout_passed": false,
+    "video_stream_duration_matches_container_duration": false,
+    "audio_video_duration_consistent": false,
+    "duplicate_gate_passed": false,
+    "gpu_launch_allowed": false,
+    "manual_promotion_required": true,
+    "stable_release_modified": false
+  },
+  "next_action": "Import approved originals into the private clone data store, bind their private provenance to these aliases, run source integrity and identity-holdout QA, then build C005 as a challenger without modifying the stable release."
+}
