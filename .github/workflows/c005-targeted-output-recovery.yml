@@ -29,76 +29,96 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
 
-      - name: Recover only C005 review outputs from existing failed kernel
+      - name: Recover existing C005 MP4 only
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .c005-targeted-recovery
+          rm -rf c005-targeted-recovery
+          mkdir -p c005-targeted-recovery/download
           timeout --signal=TERM --kill-after=10s 180s python - <<'PY'
-          import json, os
+          import json, os, time
           from pathlib import Path
           from kaggle.api.kaggle_api_extended import KaggleApi
 
-          root=Path('.c005-targeted-recovery')
+          root=Path('c005-targeted-recovery')
+          dest=root/'download'
           kernel=f"{os.environ['KAGGLE_USERNAME']}/zaskaleta-c005-{os.environ['EXISTING_GPU_RUN_ID']}"
           api=KaggleApi(); api.authenticate()
-          patterns=[
-              'CLONE_V2_TALKING_TEST.mp4',
-              'CLONE_V2_TEMPORAL_FACE_GUARD.json',
-              'CLONE_V2_RENDER_PROVENANCE.json',
-              'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json',
-              'zaskaleta_c005_status.json',
-          ]
-          results=[]
-          for pat in patterns:
-              dest=root/pat.replace('.','_')
-              dest.mkdir(parents=True,exist_ok=True)
+          result={'pattern':'CLONE_V2_TALKING_TEST.mp4','ok':False,'attempts':0}
+          for attempt, delay in enumerate((0, 20, 45), start=1):
+              if delay:
+                  time.sleep(delay)
+              result['attempts']=attempt
               try:
-                  files,next_token=api.kernels_output(kernel,path=str(dest),file_pattern=pat,force=True,quiet=True,page_size=200)
-                  results.append({'pattern':pat,'ok':True,'files':[Path(x).name for x in (files or [])],'next_token':bool(next_token)})
+                  files,next_token=api.kernels_output(
+                      kernel,
+                      path=str(dest),
+                      file_pattern='CLONE_V2_TALKING_TEST.mp4',
+                      force=True,
+                      quiet=True,
+                      page_size=200,
+                  )
+                  result.update({'ok':True,'files':[Path(x).name for x in (files or [])],'next_token':bool(next_token)})
+                  break
               except Exception as exc:
-                  results.append({'pattern':pat,'ok':False,'error_type':type(exc).__name__,'error':str(exc)[:500]})
-          (root/'recovery_results.json').write_text(json.dumps(results,indent=2)+'\n',encoding='utf-8')
-          print(json.dumps(results,indent=2))
+                  result.update({'error_type':type(exc).__name__,'error':str(exc)[:500]})
+                  if '429' not in str(exc):
+                      break
+          (root/'recovery_result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(result,indent=2))
           PY
-          find .c005-targeted-recovery -type f -printf '%P\n' | sort
+          find c005-targeted-recovery -type f -printf '%P\n' | sort
 
-      - name: Validate recovered MP4 and capture temporal guard
+      - name: Validate recovered MP4 stream integrity
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, subprocess
+          import hashlib, json, subprocess
           from pathlib import Path
-          root=Path('.c005-targeted-recovery')
-          videos=list(root.rglob('CLONE_V2_TALKING_TEST.mp4'))
-          guards=list(root.rglob('CLONE_V2_TEMPORAL_FACE_GUARD.json'))
+
+          root=Path('c005-targeted-recovery')
+          videos=list((root/'download').rglob('CLONE_V2_TALKING_TEST.mp4'))
           out={
-            'schema':'zaskaleta-c005-targeted-output-recovery-v1',
+            'schema':'zaskaleta-c005-targeted-output-recovery-v2',
             'existing_gpu_run_id':'34373548007',
             'new_gpu_launched':False,
             'stable_release_modified':False,
             'video_match_count':len(videos),
-            'guard_match_count':len(guards),
+            'valid':False,
           }
-          if len(videos)==1:
-              p=videos[0]
-              raw=subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,duration,nb_frames,avg_frame_rate,width,height','-of','json',str(p)],text=True)
-              d=json.loads(raw)
-              out['video_probe']=d
-              out['video_size_bytes']=p.stat().st_size
-          if len(guards)==1:
-              g=json.loads(guards[0].read_text(encoding='utf-8'))
-              out['temporal_guard']={
-                'passed':g.get('passed'),
-                'reason':g.get('reason'),
-                'sample_count':g.get('sample_count'),
-                'passed_samples':g.get('passed_samples'),
-                'pass_ratio':g.get('pass_ratio'),
-                'required_pass_ratio':g.get('required_pass_ratio'),
-                'geometry_failures':g.get('geometry_failures'),
-                'samples':g.get('samples'),
-              }
+          if len(videos) != 1:
+              (root/'C005_TARGETED_RECOVERY_SAFE.json').write_text(json.dumps(out,indent=2)+'\n')
+              raise SystemExit(f'Expected exactly one recovered MP4, found {len(videos)}')
+          p=videos[0]
+          raw=subprocess.check_output([
+              'ffprobe','-v','error',
+              '-show_entries','format=duration:stream=codec_type,duration,nb_frames,avg_frame_rate,width,height',
+              '-of','json',str(p)
+          ],text=True)
+          d=json.loads(raw)
+          video=[s for s in d.get('streams',[]) if s.get('codec_type')=='video']
+          audio=[s for s in d.get('streams',[]) if s.get('codec_type')=='audio']
+          if len(video)!=1 or len(audio)!=1:
+              raise SystemExit('Recovered MP4 must contain exactly one video and one audio stream')
+          vd=float(video[0].get('duration') or d.get('format',{}).get('duration') or 0)
+          ad=float(audio[0].get('duration') or d.get('format',{}).get('duration') or 0)
+          frames=int(video[0].get('nb_frames') or 0)
+          if vd < 7.65 or ad < 7.65 or frames < 190 or abs(vd-ad) > 0.12:
+              raise SystemExit(f'Stream integrity failed: video={vd}s audio={ad}s frames={frames}')
+          h=hashlib.sha256()
+          with p.open('rb') as f:
+              for chunk in iter(lambda:f.read(1024*1024),b''):
+                  h.update(chunk)
+          out.update({
+              'valid':True,
+              'video_probe':d,
+              'video_size_bytes':p.stat().st_size,
+              'sha256':h.hexdigest(),
+              'video_duration':vd,
+              'audio_duration':ad,
+              'video_frames':frames,
+          })
           (root/'C005_TARGETED_RECOVERY_SAFE.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
           print(json.dumps(out,ensure_ascii=False,indent=2))
           PY
@@ -106,17 +126,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: c005-targeted-recovery-${{ github.run_id }}
-          path: |
-            .c005-targeted-recovery/C005_TARGETED_RECOVERY_SAFE.json
-            .c005-targeted-recovery/**/CLONE_V2_TALKING_TEST.mp4
-            .c005-targeted-recovery/**/CLONE_V2_TEMPORAL_FACE_GUARD.json
-            .c005-targeted-recovery/**/CLONE_V2_RENDER_PROVENANCE_EVALUATION.json
-          if-no-files-found: warn
+          path: c005-targeted-recovery/
+          if-no-files-found: error
           retention-days: 7
+          compression-level: 0
 
       - name: Safety summary
         if: always()
         run: |
           echo 'No new GPU job launched.'
-          echo 'Existing failed C005 kernel outputs targeted only.'
+          echo 'Only the already-rendered C005 review MP4 was requested.'
           echo 'Stable release remains unchanged.'
