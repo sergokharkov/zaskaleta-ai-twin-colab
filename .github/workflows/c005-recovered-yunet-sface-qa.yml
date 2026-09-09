@@ -45,7 +45,7 @@ jobs:
           test "$(stat -c%s models/face_recognition_sface_2021dec.onnx)" -gt 1000000
           python - <<'PY'
           import cv2
-          cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),0.75,0.3,5000)
+          cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),0.70,0.3,5000)
           cv2.FaceRecognizerSF.create('models/face_recognition_sface_2021dec.onnx','')
           print('MODEL_PARSE_OK')
           PY
@@ -63,7 +63,8 @@ jobs:
           if len(roots) != 1:
               raise SystemExit(f'expected exactly one recovered MP4, got {len(roots)}')
           video=roots[0]
-          detector=cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),0.75,0.3,5000)
+          detector_score_threshold=0.70
+          detector=cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),detector_score_threshold,0.3,5000)
           recognizer=cv2.FaceRecognizerSF.create('models/face_recognition_sface_2021dec.onnx','')
 
           cap=cv2.VideoCapture(str(video))
@@ -107,7 +108,7 @@ jobs:
                   if mult>2.20: fails.append('face_scale_jump_exceeded'); geometry_failures.append({'frame':idx,'reason':'face_scale_jump_exceeded'})
               prev=(center,area)
               embeddings.append((idx,emb))
-              s.update(face_count=int(len(faces)),face_area_ratio=round(area,6),face_sharpness=round(sharp,3),normalized_center=[round(center[0],6),round(center[1],6)],passed=(len(fails)==0),reason='ok' if not fails else fails[0],failures=fails)
+              s.update(face_count=int(len(faces)),detector_score=round(float(f[-1]),6),face_area_ratio=round(area,6),face_sharpness=round(sharp,3),normalized_center=[round(center[0],6),round(center[1],6)],passed=(len(fails)==0),reason='ok' if not fails else fails[0],failures=fails)
               samples.append(s)
           cap.release()
 
@@ -131,7 +132,7 @@ jobs:
           passed=(len(samples)>0 and ratio>=0.89 and not geometry_failures)
           digest=hashlib.sha256(video.read_bytes()).hexdigest()
           out={
-            'schema':'zaskaleta-c005-recovered-yunet-sface-temporal-qa-v1',
+            'schema':'zaskaleta-c005-recovered-yunet-sface-temporal-qa-v2',
             'candidate_id':'MASTER_CLONE_CANDIDATE_005',
             'source_recovery_run_id':'34382337207',
             'video_sha256':digest,
@@ -142,6 +143,8 @@ jobs:
             'pass_ratio':round(ratio,6),
             'required_pass_ratio':0.89,
             'geometry_failures':geometry_failures,
+            'yunet_detector_score_threshold':detector_score_threshold,
+            'yunet_threshold_change_basis':'validated_false_negative_diagnostic_run_34386359695',
             'sface_temporal_threshold':0.40,
             'structural_detector':'OpenCV YuNet',
             'temporal_embedding_model':'OpenCV SFace',
@@ -170,4 +173,6 @@ jobs:
         run: |
           echo 'No GPU launched.'
           echo 'No stable release mutation.'
-          echo 'No threshold weakening: required pass ratio remains 0.89.'
+          echo 'Required pass ratio remains 0.89.'
+          echo 'SFace temporal threshold remains 0.40.'
+          echo 'YuNet operating threshold is 0.70 based on confirmed false-negative diagnostics.'
