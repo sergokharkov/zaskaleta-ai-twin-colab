@@ -28,16 +28,18 @@ jobs:
           repository: ${{ github.repository }}
           run-id: 34382337207
 
-      - name: Install verified YuNet model
+      - name: Install verified YuNet and SFace models
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --quiet opencv-contrib-python-headless==4.10.0.84 numpy
           mkdir -p models
           curl -fL --retry 4 --retry-delay 3 'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx' -o models/yunet.onnx
+          curl -fL --retry 4 --retry-delay 3 'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx' -o models/sface.onnx
           test "$(stat -c%s models/yunet.onnx)" -gt 100000
+          test "$(stat -c%s models/sface.onnx)" -gt 1000000
 
-      - name: Measure overlap and landmark geometry at frame 50
+      - name: Track YuNet detections across frames 40 to 60
         shell: bash
         run: |
           set -euo pipefail
@@ -47,46 +49,89 @@ jobs:
           from pathlib import Path
 
           video=list(Path('recovered').rglob('CLONE_V2_TALKING_TEST.mp4'))[0]
-          cap=cv2.VideoCapture(str(video)); cap.set(cv2.CAP_PROP_POS_FRAMES,50)
-          ok,frame=cap.read(); cap.release()
-          if not ok: raise SystemExit('cannot read frame 50')
-          h,w=frame.shape[:2]
-          det=cv2.FaceDetectorYN.create('models/yunet.onnx','',(w,h),0.70,0.3,5000)
-          _,faces=det.detect(frame)
-          fs=[] if faces is None else [np.asarray(f,dtype=np.float32) for f in faces]
-          if len(fs)!=2: raise SystemExit(f'expected 2 raw detections, got {len(fs)}')
+          rec=cv2.FaceRecognizerSF.create('models/sface.onnx','')
+          cap=cv2.VideoCapture(str(video))
+          if not cap.isOpened(): raise SystemExit('video open failed')
+
+          def read_frame(idx):
+              cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
+              ok,fr=cap.read()
+              if not ok or fr is None: raise SystemExit(f'cannot read frame {idx}')
+              return fr
+
+          def detect(frame,thr=0.70):
+              h,w=frame.shape[:2]
+              det=cv2.FaceDetectorYN.create('models/yunet.onnx','',(w,h),thr,0.3,5000)
+              _,faces=det.detect(frame)
+              return [] if faces is None else [np.asarray(f,dtype=np.float32) for f in faces]
 
           def box(f):
               x,y,bw,bh=map(float,f[:4]); return (x,y,x+bw,y+bh)
-          def ar(b): return max(0,b[2]-b[0])*max(0,b[3]-b[1])
+          def area(b): return max(0,b[2]-b[0])*max(0,b[3]-b[1])
           def inter(a,b):
               return max(0,min(a[2],b[2])-max(a[0],b[0]))*max(0,min(a[3],b[3])-max(a[1],b[1]))
-          def pts(f):
-              v=list(map(float,f[4:14])); return [(v[i],v[i+1]) for i in range(0,10,2)]
+          def pair_metrics(f1,f2,w,h):
+              b1,b2=box(f1),box(f2); a1,a2=area(b1),area(b2); ia=inter(b1,b2)
+              iou=ia/(a1+a2-ia) if a1+a2-ia else 0.0
+              contain=ia/min(a1,a2) if min(a1,a2) else 0.0
+              c1=((b1[0]+b1[2])/2,(b1[1]+b1[3])/2); c2=((b2[0]+b2[2])/2,(b2[1]+b2[3])/2)
+              return iou,contain,math.dist(c1,c2)/math.hypot(w,h)
 
-          b1,b2=box(fs[0]),box(fs[1]); a1,a2=ar(b1),ar(b2); ia=inter(b1,b2)
-          iou=ia/(a1+a2-ia) if a1+a2-ia else 0.0
-          contain=ia/min(a1,a2) if min(a1,a2) else 0.0
-          c1=((b1[0]+b1[2])/2,(b1[1]+b1[3])/2); c2=((b2[0]+b2[2])/2,(b2[1]+b2[3])/2)
-          center_dist=math.dist(c1,c2)/math.hypot(w,h)
-          p1,p2=pts(fs[0]),pts(fs[1])
-          d1=math.hypot(b1[2]-b1[0],b1[3]-b1[1]); d2=math.hypot(b2[2]-b2[0],b2[3]-b2[1]); norm=max((d1+d2)/2,1)
-          lm=[math.dist(a,b)/norm for a,b in zip(p1,p2)]
-          duplicate_like=bool((iou>=0.35 or contain>=0.70) and sum(lm)/len(lm)<=0.18 and max(lm)<=0.30)
+          anchor_frame=read_frame(0)
+          af=detect(anchor_frame)
+          if not af: raise SystemExit('anchor missing')
+          anchor=max(af,key=lambda f:float(f[2]*f[3]))
+          anchor_emb=rec.feature(rec.alignCrop(anchor_frame,anchor))
+
+          rows=[]; multi_frames=[]; distinct_like_frames=[]
+          for idx in range(40,61):
+              fr=read_frame(idx); h,w=fr.shape[:2]
+              fs=sorted(detect(fr),key=lambda f:float(f[2]*f[3]),reverse=True)
+              row={'frame':idx,'raw_detection_count':len(fs),'detections':[]}
+              for rank,f in enumerate(fs,1):
+                  x,y,bw,bh=map(float,f[:4])
+                  emb=rec.feature(rec.alignCrop(fr,f))
+                  cos=float(rec.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE))
+                  row['detections'].append({
+                    'rank_by_area':rank,
+                    'detector_score':round(float(f[-1]),6),
+                    'area_ratio':round((bw*bh)/(w*h),6),
+                    'center':[round((x+bw/2)/w,6),round((y+bh/2)/h,6)],
+                    'sface_anchor_cosine':round(cos,6)
+                  })
+              if len(fs)>=2:
+                  multi_frames.append(idx)
+                  iou,contain,cd=pair_metrics(fs[0],fs[1],w,h)
+                  row['top2_pair_metrics']={'iou':round(iou,6),'intersection_over_smaller_box':round(contain,6),'normalized_center_distance':round(cd,6)}
+                  # Conservative spatial evidence only: no deduplication and no gate weakening.
+                  if iou < 0.35 and contain < 0.70 and cd > 0.05:
+                      distinct_like_frames.append(idx)
+              rows.append(row)
+          cap.release()
+
+          longest=0; cur=0; prev=None
+          for idx in distinct_like_frames:
+              if prev is not None and idx==prev+1: cur+=1
+              else: cur=1
+              longest=max(longest,cur); prev=idx
 
           out={
-            'schema':'zaskaleta-c005-yunet-multiface-diagnostic-v2',
-            'source_recovery_run_id':'34382337207','frame':50,'yunet_score_threshold':0.70,
-            'required_single_face_policy':True,'gate_pass_ratio_unchanged':0.89,
-            'stable_release_modified':False,'new_gpu_launched':False,
-            'raw_detection_count':2,
-            'pair_metrics':{
-              'iou':round(iou,6),'intersection_over_smaller_box':round(contain,6),
-              'normalized_center_distance':round(center_dist,6),
-              'normalized_landmark_mean_distance':round(sum(lm)/len(lm),6),
-              'normalized_landmark_max_distance':round(max(lm),6)},
-            'duplicate_like_same_object_hypothesis':duplicate_like,
-            'decision':'DUPLICATE_LIKE' if duplicate_like else 'AMBIGUOUS_OR_DISTINCT'
+            'schema':'zaskaleta-c005-yunet-temporal-multiface-diagnostic-v1',
+            'source_recovery_run_id':'34382337207',
+            'frame_range':[40,60],
+            'yunet_score_threshold':0.70,
+            'sface_temporal_threshold_reference':0.40,
+            'required_single_face_policy':True,
+            'gate_pass_ratio_unchanged':0.89,
+            'stable_release_modified':False,
+            'new_gpu_launched':False,
+            'multi_detection_frames':multi_frames,
+            'multi_detection_frame_count':len(multi_frames),
+            'spatially_distinct_like_frames':distinct_like_frames,
+            'spatially_distinct_like_frame_count':len(distinct_like_frames),
+            'longest_consecutive_spatially_distinct_like_run':longest,
+            'decision':'PERSISTENT_MULTIFACE_EVIDENCE' if longest>=3 else ('TRANSIENT_OR_AMBIGUOUS' if multi_frames else 'SINGLE_FACE_ONLY'),
+            'rows':rows
           }
           Path('C005_YUNET_MULTIFACE_DIAG.json').write_text(json.dumps(out,indent=2)+'\n')
           print(json.dumps(out,indent=2))
@@ -103,6 +148,7 @@ jobs:
         if: always()
         run: |
           echo 'Diagnostic only. No GPU launched.'
+          echo 'No deduplication applied.'
           echo 'Single-face policy remains required.'
           echo 'Required pass ratio remains 0.89.'
           echo 'Stable release unchanged.'
