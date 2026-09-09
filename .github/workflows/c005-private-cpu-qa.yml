@@ -1,0 +1,94 @@
+name: C005 Private CPU QA
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/c005_private_cpu_qa.py'
+      - '.github/workflows/c005-private-cpu-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: c005-private-cpu-qa
+  cancel-in-progress: false
+jobs:
+  cpu-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      CANDIDATE: MASTER_CLONE_CANDIDATE_005
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install QA dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet 'kaggle>=1.8.0'
+      - name: Download private C005 reference dataset
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c005-cpu && mkdir -p .c005-cpu/dataset .c005-cpu/out
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c005-cpu/dataset --unzip -q
+          test -d .c005-cpu/dataset/C005_REFERENCES
+      - name: CPU QA pass 1
+        run: |
+          set -euo pipefail
+          python worker/c005_private_cpu_qa.py \
+            --root .c005-cpu/dataset/C005_REFERENCES \
+            --pass-id pass-1 \
+            --source-sha "$GITHUB_SHA" \
+            --output .c005-cpu/out/pass-1.json
+      - name: CPU QA pass 2
+        run: |
+          set -euo pipefail
+          python worker/c005_private_cpu_qa.py \
+            --root .c005-cpu/dataset/C005_REFERENCES \
+            --pass-id pass-2 \
+            --source-sha "$GITHUB_SHA" \
+            --output .c005-cpu/out/pass-2.json
+      - name: Assert two complete passes and keep GPU blocked
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows=[json.loads(Path(f'.c005-cpu/out/pass-{i}.json').read_text()) for i in (1,2)]
+          assert len(rows)==2
+          assert all(r.get('candidate_id')==os.environ['CANDIDATE'] for r in rows)
+          assert all(r.get('source_sha')==os.environ['GITHUB_SHA'] for r in rows)
+          assert all(r.get('decision')=='CPU_QA_PASS' and r.get('complete') is True for r in rows)
+          assert all(r.get('gpu_launch_allowed') is False for r in rows)
+          assert all(r.get('stable_release_modified') is False for r in rows)
+          out={
+            'schema':'zaskaleta-c005-two-pass-cpu-qa-v1',
+            'candidate_id':os.environ['CANDIDATE'],
+            'source_sha':os.environ['GITHUB_SHA'],
+            'decision':'CPU_QA_VERIFIED',
+            'passes':[{'pass_id':r['pass_id'],'passed':True,'complete':True} for r in rows],
+            'gpu_launch_allowed':False,
+            'stable_release_modified':False,
+            'next_stage':'IDENTITY_HOLDOUT_QA'
+          }
+          Path('.c005-cpu/out/summary.json').write_text(json.dumps(out,indent=2)+'\n')
+          print('C005_TWO_PASS_CPU_QA_VERIFIED')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-private-cpu-qa-${{ github.run_id }}
+          path: .c005-cpu/out/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'CPU QA only. No Kaggle kernel push, GPU render, auto-promotion, or stable-release mutation occurs here.'
