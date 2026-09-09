@@ -32,20 +32,39 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install holdout dependencies
+      - name: Install holdout dependencies and verified ONNX models
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --quiet 'kaggle>=1.8.0' 'opencv-contrib-python-headless==4.10.0.84' 'numpy<2'
+          rm -rf .c005-models
           mkdir -p .c005-models
+
+          # OpenCV Zoo stores these ONNX files with Git LFS. raw.githubusercontent.com
+          # returns the tiny LFS pointer, not the model bytes. media.githubusercontent.com
+          # resolves the LFS object itself.
           curl -fL --retry 3 --retry-delay 2 \
-            https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+            https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
             -o .c005-models/face_detection_yunet_2023mar.onnx
           curl -fL --retry 3 --retry-delay 2 \
-            https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx \
+            https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx \
             -o .c005-models/face_recognition_sface_2021dec.onnx
-          test -s .c005-models/face_detection_yunet_2023mar.onnx
-          test -s .c005-models/face_recognition_sface_2021dec.onnx
+
+          DET_SIZE="$(stat -c%s .c005-models/face_detection_yunet_2023mar.onnx)"
+          REC_SIZE="$(stat -c%s .c005-models/face_recognition_sface_2021dec.onnx)"
+          echo "YuNet bytes=$DET_SIZE"
+          echo "SFace bytes=$REC_SIZE"
+          test "$DET_SIZE" -gt 100000 || { echo 'YuNet download is not a real ONNX model'; exit 21; }
+          test "$REC_SIZE" -gt 1000000 || { echo 'SFace download is not a real ONNX model'; exit 22; }
+
+          python - <<'PY'
+          import cv2
+          det='.c005-models/face_detection_yunet_2023mar.onnx'
+          rec='.c005-models/face_recognition_sface_2021dec.onnx'
+          cv2.FaceDetectorYN.create(det, '', (320,320), 0.8, 0.3, 5000)
+          cv2.FaceRecognizerSF.create(rec, '')
+          print('C005_ONNX_MODELS_PARSE_OK')
+          PY
 
       - name: Download private C005 reference dataset
         shell: bash
