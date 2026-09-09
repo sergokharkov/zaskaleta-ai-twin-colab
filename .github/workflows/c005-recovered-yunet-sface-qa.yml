@@ -14,7 +14,7 @@ permissions:
 jobs:
   validate-recovered-c005:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -50,7 +50,7 @@ jobs:
           print('MODEL_PARSE_OK')
           PY
 
-      - name: Run YuNet SFace temporal QA without weakening policy
+      - name: Run hardened YuNet SFace temporal QA
         shell: bash
         run: |
           set -euo pipefail
@@ -64,6 +64,9 @@ jobs:
               raise SystemExit(f'expected exactly one recovered MP4, got {len(roots)}')
           video=roots[0]
           detector_score_threshold=0.70
+          temporal_cosine_threshold=0.40
+          transient_multiface_cosine_floor=0.70
+          required_ratio=0.89
           detector=cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),detector_score_threshold,0.3,5000)
           recognizer=cv2.FaceRecognizerSF.create('models/face_recognition_sface_2021dec.onnx','')
 
@@ -71,29 +74,107 @@ jobs:
           if not cap.isOpened(): raise SystemExit('video open failed')
           n=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
           fps=float(cap.get(cv2.CAP_PROP_FPS) or 0)
+          if n <= 0: raise SystemExit('invalid frame count')
+
+          def read_frame(idx):
+              cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
+              ok,fr=cap.read()
+              if not ok or fr is None: raise RuntimeError(f'cannot read frame {idx}')
+              return fr
+
+          def detect(fr):
+              h,w=fr.shape[:2]
+              detector.setInputSize((w,h))
+              _,faces=detector.detect(fr)
+              if faces is None: return []
+              return [np.asarray(f,dtype=np.float32) for f in faces]
+
+          # Anchor is only for same-render temporal consistency; it is not an identity claim.
+          anchor_frame=read_frame(0)
+          anchor_faces=detect(anchor_frame)
+          if not anchor_faces: raise SystemExit('anchor face missing')
+          anchor=max(anchor_faces,key=lambda f:float(f[2]*f[3]))
+          anchor_emb=recognizer.feature(recognizer.alignCrop(anchor_frame,anchor))
+
+          # Full 200-frame scan hardens the single-face policy. A raw multi-detection may be
+          # treated as detector ambiguity only when it is isolated in time and every detected
+          # face crop is strongly consistent with the same render anchor. We never silently
+          # drop the second box: raw counts and the classification remain auditable.
+          raw_counts=[]; no_face_frames=[]; multi_frames=[]; multi_details=[]
+          for idx in range(n):
+              fr=read_frame(idx)
+              fs=detect(fr)
+              raw_counts.append(len(fs))
+              if not fs:
+                  no_face_frames.append(idx)
+                  continue
+              if len(fs) > 1:
+                  multi_frames.append(idx)
+                  cosines=[]
+                  for f in fs:
+                      emb=recognizer.feature(recognizer.alignCrop(fr,f))
+                      cosines.append(float(recognizer.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE)))
+                  multi_details.append({'frame':idx,'raw_face_count':len(fs),'anchor_cosines':[round(x,6) for x in cosines]})
+
+          def longest_run(vals):
+              best=cur=0; prev=None
+              for idx in vals:
+                  cur=cur+1 if prev is not None and idx==prev+1 else 1
+                  best=max(best,cur); prev=idx
+              return best
+
+          longest_multi=longest_run(multi_frames)
+          persistent_multiface=(longest_multi >= 2)
+          transient_multi_frames=[]; unresolved_multi_frames=[]
+          multi_detail_by_frame={x['frame']:x for x in multi_details}
+          for idx in multi_frames:
+              isolated=(idx==0 or raw_counts[idx-1] <= 1) and (idx==n-1 or raw_counts[idx+1] <= 1)
+              cos_ok=all(c >= transient_multiface_cosine_floor for c in multi_detail_by_frame[idx]['anchor_cosines'])
+              if isolated and cos_ok:
+                  transient_multi_frames.append(idx)
+              else:
+                  unresolved_multi_frames.append(idx)
+
           sample_count=9
           idxs=sorted({int(round(i*(n-1)/max(sample_count-1,1))) for i in range(sample_count)})
           samples=[]; embeddings=[]; prev=None; geometry_failures=[]
+          transient_set=set(transient_multi_frames)
 
           for idx in idxs:
-              cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
-              ok,frame=cap.read()
+              fr=read_frame(idx)
               s={'frame':idx}
-              if not ok or frame is None:
-                  s.update(passed=False,reason='frame_read_failed'); samples.append(s); continue
-              h,w=frame.shape[:2]
-              detector.setInputSize((w,h))
-              _,faces=detector.detect(frame)
-              if faces is None or len(faces)==0:
-                  s.update(passed=False,reason='no_face_detected',face_count=0); samples.append(s); prev=None; continue
-              if len(faces)>1:
-                  faces=sorted(faces,key=lambda f:float(f[2]*f[3]),reverse=True)
-              f=np.asarray(faces[0],dtype=np.float32)
+              h,w=fr.shape[:2]
+              fs=detect(fr)
+              raw_count=len(fs)
+              s['raw_face_count']=raw_count
+              if raw_count==0:
+                  s.update(passed=False,reason='no_face_detected',physical_face_cluster_count=0); samples.append(s); prev=None; continue
+              if raw_count>1 and idx not in transient_set:
+                  s.update(passed=False,reason='unresolved_multiface_detection',physical_face_cluster_count=raw_count); samples.append(s); prev=None; continue
+
+              fs=sorted(fs,key=lambda f:float(f[2]*f[3]),reverse=True)
+              # For an evidence-backed isolated ambiguity, choose the crop with the highest
+              # same-render SFace consistency, not simply the largest box.
+              if raw_count>1:
+                  scored=[]
+                  for f in fs:
+                      emb=recognizer.feature(recognizer.alignCrop(fr,f))
+                      cos=float(recognizer.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE))
+                      scored.append((cos,f,emb))
+                  scored.sort(key=lambda t:t[0],reverse=True)
+                  _,f,emb=scored[0]
+                  s['multi_detection_classification']='isolated_same_render_detector_ambiguity'
+                  s['physical_face_cluster_count']=1
+                  s['raw_detection_anchor_cosines']=[round(t[0],6) for t in scored]
+              else:
+                  f=fs[0]
+                  emb=recognizer.feature(recognizer.alignCrop(fr,f))
+                  s['physical_face_cluster_count']=1
+
               x,y,bw,bh=map(float,f[:4])
               area=(bw*bh)/(w*h)
               center=((x+bw/2)/w,(y+bh/2)/h)
-              aligned=recognizer.alignCrop(frame,f)
-              emb=recognizer.feature(aligned)
+              aligned=recognizer.alignCrop(fr,f)
               sharp=float(cv2.Laplacian(cv2.cvtColor(aligned,cv2.COLOR_BGR2GRAY),cv2.CV_64F).var())
               fails=[]
               if not (0.008 <= area <= 0.36): fails.append('face_size_out_of_range')
@@ -108,31 +189,30 @@ jobs:
                   if mult>2.20: fails.append('face_scale_jump_exceeded'); geometry_failures.append({'frame':idx,'reason':'face_scale_jump_exceeded'})
               prev=(center,area)
               embeddings.append((idx,emb))
-              s.update(face_count=int(len(faces)),detector_score=round(float(f[-1]),6),face_area_ratio=round(area,6),face_sharpness=round(sharp,3),normalized_center=[round(center[0],6),round(center[1],6)],passed=(len(fails)==0),reason='ok' if not fails else fails[0],failures=fails)
+              s.update(detector_score=round(float(f[-1]),6),face_area_ratio=round(area,6),face_sharpness=round(sharp,3),normalized_center=[round(center[0],6),round(center[1],6)],passed=(len(fails)==0),reason='ok' if not fails else fails[0],failures=fails)
               samples.append(s)
           cap.release()
 
-          # SFace is used here only for same-render temporal consistency, not for identifying a person.
           if embeddings:
-              anchor=embeddings[0][1]
               score_by_frame={}
               for idx,emb in embeddings:
-                  score=float(recognizer.match(anchor,emb,cv2.FaceRecognizerSF_FR_COSINE))
+                  score=float(recognizer.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE))
                   score_by_frame[idx]=score
               for s in samples:
                   if s['frame'] in score_by_frame:
                       s['sface_anchor_cosine']=round(score_by_frame[s['frame']],6)
-                      if score_by_frame[s['frame']] < 0.40:
+                      if score_by_frame[s['frame']] < temporal_cosine_threshold:
                           s.setdefault('failures',[]).append('sface_temporal_mismatch')
                           s['passed']=False
                           s['reason']='sface_temporal_mismatch'
 
           passed_samples=sum(1 for s in samples if s.get('passed'))
           ratio=passed_samples/len(samples) if samples else 0
-          passed=(len(samples)>0 and ratio>=0.89 and not geometry_failures)
+          structural_ok=(not geometry_failures and not persistent_multiface and not unresolved_multi_frames and len(no_face_frames)==0)
+          passed=(len(samples)>0 and ratio>=required_ratio and structural_ok)
           digest=hashlib.sha256(video.read_bytes()).hexdigest()
           out={
-            'schema':'zaskaleta-c005-recovered-yunet-sface-temporal-qa-v2',
+            'schema':'zaskaleta-c005-recovered-yunet-sface-temporal-qa-v3',
             'candidate_id':'MASTER_CLONE_CANDIDATE_005',
             'source_recovery_run_id':'34382337207',
             'video_sha256':digest,
@@ -141,11 +221,20 @@ jobs:
             'sample_count':len(samples),
             'passed_samples':passed_samples,
             'pass_ratio':round(ratio,6),
-            'required_pass_ratio':0.89,
+            'required_pass_ratio':required_ratio,
             'geometry_failures':geometry_failures,
             'yunet_detector_score_threshold':detector_score_threshold,
             'yunet_threshold_change_basis':'validated_false_negative_diagnostic_run_34386359695',
-            'sface_temporal_threshold':0.40,
+            'sface_temporal_threshold':temporal_cosine_threshold,
+            'transient_multiface_cosine_floor':transient_multiface_cosine_floor,
+            'single_face_policy':'full_frame_temporal_persistence_with_audited_isolated_same_render_ambiguity',
+            'multi_detection_frames':multi_frames,
+            'multi_detection_frame_count':len(multi_frames),
+            'longest_consecutive_multi_detection_run':longest_multi,
+            'transient_multi_detection_frames':transient_multi_frames,
+            'unresolved_multi_detection_frames':unresolved_multi_frames,
+            'no_face_frames':no_face_frames,
+            'persistent_multiface_evidence':persistent_multiface,
             'structural_detector':'OpenCV YuNet',
             'temporal_embedding_model':'OpenCV SFace',
             'sface_is_identity_claim':False,
@@ -153,6 +242,7 @@ jobs:
             'decision':'PASS_RECOVERED_YUNET_SFACE_QA' if passed else 'FAIL_RECOVERED_YUNET_SFACE_QA',
             'stable_release_modified':False,
             'auto_promote':False,
+            'new_gpu_launched':False,
             'samples':samples,
           }
           Path('C005_RECOVERED_YUNET_SFACE_QA.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
@@ -173,6 +263,8 @@ jobs:
         run: |
           echo 'No GPU launched.'
           echo 'No stable release mutation.'
+          echo 'No automatic promotion.'
           echo 'Required pass ratio remains 0.89.'
           echo 'SFace temporal threshold remains 0.40.'
-          echo 'YuNet operating threshold is 0.70 based on confirmed false-negative diagnostics.'
+          echo 'YuNet operating threshold remains 0.70.'
+          echo 'Single-face policy now uses full-frame temporal persistence and audited isolated ambiguity only.'
