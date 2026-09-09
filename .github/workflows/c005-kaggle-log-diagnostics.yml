@@ -1,0 +1,100 @@
+name: C005 Kaggle Log Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-kaggle-log-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-c005-logs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      EXISTING_GPU_RUN_ID: '34373548007'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Kaggle client
+        run: python -m pip install --quiet 'kaggle>=1.8.0'
+
+      - name: Fetch bounded execution logs from existing failed kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .c005-logdiag
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          timeout 20s kaggle kernels status "$KERNEL" 2>&1 | tee .c005-logdiag/status.txt || true
+          set +e
+          timeout --signal=TERM --kill-after=5s 90s kaggle kernels logs "$KERNEL" > .c005-logdiag/raw.log 2>&1
+          rc=$?
+          set -e
+          echo "KAGGLE_LOGS_RC=$rc" | tee .c005-logdiag/logs_rc.txt
+          test -s .c005-logdiag/raw.log || echo 'No raw log payload returned' > .c005-logdiag/raw.log
+
+      - name: Extract sanitized traceback and terminal errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          root=Path('.c005-logdiag')
+          raw=(root/'raw.log').read_text(encoding='utf-8',errors='replace')
+          lines=raw.splitlines()
+          patterns=re.compile(r'(Traceback \(most recent call last\)|Error|Exception|RuntimeError|CalledProcessError|ModuleNotFoundError|ImportError|FileNotFoundError|CUDA|CUDNN|OOM|out of memory|Killed|SIGKILL|ffmpeg|musetalk)',re.I)
+          hits=[i for i,l in enumerate(lines) if patterns.search(l)]
+          selected=[]
+          if hits:
+              start=max(0,hits[-1]-80)
+              end=min(len(lines),hits[-1]+60)
+              selected=lines[start:end]
+          else:
+              selected=lines[-180:]
+          text='\n'.join(selected)
+          text=re.sub(r'/(kaggle|home|tmp)/[^\s\"\']+', '<PATH>', text)
+          text=re.sub(r'https?://[^\s]+', '<URL>', text)
+          text=re.sub(r'(?i)(token|secret|key|password)=[^\s]+', r'\1=<REDACTED>', text)
+          (root/'C005_TRACEBACK_SAFE.txt').write_text(text+'\n',encoding='utf-8')
+          rc=(root/'logs_rc.txt').read_text().strip() if (root/'logs_rc.txt').exists() else None
+          status=(root/'status.txt').read_text().strip() if (root/'status.txt').exists() else None
+          summary={
+            'schema':'zaskaleta-c005-kaggle-log-diagnostics-v1',
+            'existing_gpu_run_id':'34373548007',
+            'new_gpu_launched':False,
+            'stable_release_modified':False,
+            'kernel_status':status,
+            'logs_command':rc,
+            'raw_log_lines':len(lines),
+            'error_markers_found':len(hits),
+            'traceback_excerpt_file':'C005_TRACEBACK_SAFE.txt'
+          }
+          (root/'C005_LOG_DIAG_SAFE.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          print('--- TRACEBACK EXCERPT ---')
+          print(text[-12000:])
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-kaggle-logdiag-${{ github.run_id }}
+          path: |
+            .c005-logdiag/C005_LOG_DIAG_SAFE.json
+            .c005-logdiag/C005_TRACEBACK_SAFE.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No new GPU job launched.'
+          echo 'Existing failed C005 kernel logs inspected only.'
+          echo 'Stable release remains unchanged.'
