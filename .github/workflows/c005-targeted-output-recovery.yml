@@ -1,0 +1,122 @@
+name: C005 Targeted Output Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-targeted-output-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover-c005-output:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      EXISTING_GPU_RUN_ID: '34373548007'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install recovery dependencies
+        run: |
+          python -m pip install --quiet 'kaggle>=1.8.0'
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Recover only C005 review outputs from existing failed kernel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .c005-targeted-recovery
+          timeout --signal=TERM --kill-after=10s 180s python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from kaggle.api.kaggle_api_extended import KaggleApi
+
+          root=Path('.c005-targeted-recovery')
+          kernel=f"{os.environ['KAGGLE_USERNAME']}/zaskaleta-c005-{os.environ['EXISTING_GPU_RUN_ID']}"
+          api=KaggleApi(); api.authenticate()
+          patterns=[
+              'CLONE_V2_TALKING_TEST.mp4',
+              'CLONE_V2_TEMPORAL_FACE_GUARD.json',
+              'CLONE_V2_RENDER_PROVENANCE.json',
+              'CLONE_V2_RENDER_PROVENANCE_EVALUATION.json',
+              'zaskaleta_c005_status.json',
+          ]
+          results=[]
+          for pat in patterns:
+              dest=root/pat.replace('.','_')
+              dest.mkdir(parents=True,exist_ok=True)
+              try:
+                  files,next_token=api.kernels_output(kernel,path=str(dest),file_pattern=pat,force=True,quiet=True,page_size=200)
+                  results.append({'pattern':pat,'ok':True,'files':[Path(x).name for x in (files or [])],'next_token':bool(next_token)})
+              except Exception as exc:
+                  results.append({'pattern':pat,'ok':False,'error_type':type(exc).__name__,'error':str(exc)[:500]})
+          (root/'recovery_results.json').write_text(json.dumps(results,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(results,indent=2))
+          PY
+          find .c005-targeted-recovery -type f -printf '%P\n' | sort
+
+      - name: Validate recovered MP4 and capture temporal guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          root=Path('.c005-targeted-recovery')
+          videos=list(root.rglob('CLONE_V2_TALKING_TEST.mp4'))
+          guards=list(root.rglob('CLONE_V2_TEMPORAL_FACE_GUARD.json'))
+          out={
+            'schema':'zaskaleta-c005-targeted-output-recovery-v1',
+            'existing_gpu_run_id':'34373548007',
+            'new_gpu_launched':False,
+            'stable_release_modified':False,
+            'video_match_count':len(videos),
+            'guard_match_count':len(guards),
+          }
+          if len(videos)==1:
+              p=videos[0]
+              raw=subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,duration,nb_frames,avg_frame_rate,width,height','-of','json',str(p)],text=True)
+              d=json.loads(raw)
+              out['video_probe']=d
+              out['video_size_bytes']=p.stat().st_size
+          if len(guards)==1:
+              g=json.loads(guards[0].read_text(encoding='utf-8'))
+              out['temporal_guard']={
+                'passed':g.get('passed'),
+                'reason':g.get('reason'),
+                'sample_count':g.get('sample_count'),
+                'passed_samples':g.get('passed_samples'),
+                'pass_ratio':g.get('pass_ratio'),
+                'required_pass_ratio':g.get('required_pass_ratio'),
+                'geometry_failures':g.get('geometry_failures'),
+                'samples':g.get('samples'),
+              }
+          (root/'C005_TARGETED_RECOVERY_SAFE.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-targeted-recovery-${{ github.run_id }}
+          path: |
+            .c005-targeted-recovery/C005_TARGETED_RECOVERY_SAFE.json
+            .c005-targeted-recovery/**/CLONE_V2_TALKING_TEST.mp4
+            .c005-targeted-recovery/**/CLONE_V2_TEMPORAL_FACE_GUARD.json
+            .c005-targeted-recovery/**/CLONE_V2_RENDER_PROVENANCE_EVALUATION.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No new GPU job launched.'
+          echo 'Existing failed C005 kernel outputs targeted only.'
+          echo 'Stable release remains unchanged.'
