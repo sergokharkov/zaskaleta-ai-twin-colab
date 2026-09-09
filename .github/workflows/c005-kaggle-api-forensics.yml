@@ -1,0 +1,151 @@
+name: C005 Kaggle API Forensics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-kaggle-api-forensics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-existing-c005:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      EXISTING_GPU_RUN_ID: '34373548007'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Kaggle client
+        run: python -m pip install --quiet 'kaggle>=1.8.0'
+
+      - name: Inspect Kaggle kernel API capabilities and terminal state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .c005-forensics
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          timeout 20s kaggle kernels status "$KERNEL" 2>&1 | tee .c005-forensics/status.txt || true
+          timeout 20s kaggle kernels --help 2>&1 | tee .c005-forensics/kernels_help.txt || true
+          timeout 20s kaggle kernels files --help 2>&1 | tee .c005-forensics/files_help.txt || true
+          python - <<'PY' | tee .c005-forensics/api_methods.txt
+          import inspect
+          from kaggle.api.kaggle_api_extended import KaggleApi
+          names=[]
+          for name in dir(KaggleApi):
+              low=name.lower()
+              if 'kernel' in low or 'notebook' in low:
+                  obj=getattr(KaggleApi,name)
+                  if callable(obj):
+                      try: sig=str(inspect.signature(obj))
+                      except Exception: sig='(?)'
+                      names.append((name,sig))
+          for name,sig in sorted(names):
+              print(name+sig)
+          PY
+
+      - name: Query output file inventory without bulk download
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          set +e
+          timeout --signal=TERM --kill-after=5s 45s kaggle kernels files "$KERNEL" 2>&1 | tee .c005-forensics/files_inventory.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "FILES_INVENTORY_RC=$rc" | tee .c005-forensics/files_inventory_rc.txt
+
+      - name: Attempt targeted recovery of only status/log-like files
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          python - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          root=Path('.c005-forensics')
+          inv=(root/'files_inventory.txt').read_text(encoding='utf-8',errors='replace') if (root/'files_inventory.txt').exists() else ''
+          candidates=[]
+          for line in inv.splitlines():
+              m=re.search(r'([^\s]+(?:status|error|log|trace|evaluation)[^\s]*)',line,re.I)
+              if m:
+                  name=m.group(1).strip('"\' ,')
+                  if name not in candidates:
+                      candidates.append(name)
+          (root/'target_candidates.json').write_text(json.dumps(candidates[:30],indent=2)+'\n')
+          print('TARGET_CANDIDATES='+json.dumps(candidates[:30]))
+          PY
+          # Try CLI targeted download only when the installed client supports -f/--file.
+          if grep -Eq -- '(^|[[:space:]])(-f|--file)([=[:space:]]|$)' .c005-forensics/files_help.txt; then
+            python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path('.c005-forensics')
+          kernel=f"{os.environ['KAGGLE_USERNAME']}/zaskaleta-c005-{os.environ['EXISTING_GPU_RUN_ID']}"
+          names=json.loads((root/'target_candidates.json').read_text())
+          out=root/'targeted'
+          out.mkdir(exist_ok=True)
+          results=[]
+          for name in names[:12]:
+              cmd=['timeout','20s','kaggle','kernels','files',kernel,'-f',name,'-p',str(out)]
+              p=subprocess.run(cmd,text=True,capture_output=True)
+              results.append({'name':name,'rc':p.returncode,'stdout':p.stdout[-500:],'stderr':p.stderr[-500:]})
+          (root/'targeted_results.json').write_text(json.dumps(results,indent=2)+'\n')
+          PY
+          else
+            echo 'TARGETED_DOWNLOAD_NOT_SUPPORTED_BY_CLI' | tee .c005-forensics/targeted_not_supported.txt
+          fi
+
+      - name: Build sanitized forensic summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          root=Path('.c005-forensics')
+          status=(root/'status.txt').read_text(encoding='utf-8',errors='replace').strip() if (root/'status.txt').exists() else None
+          inv=(root/'files_inventory.txt').read_text(encoding='utf-8',errors='replace') if (root/'files_inventory.txt').exists() else ''
+          candidates=json.loads((root/'target_candidates.json').read_text()) if (root/'target_candidates.json').exists() else []
+          summary={
+            'schema':'zaskaleta-c005-kaggle-api-forensics-v1',
+            'existing_gpu_run_id':'34373548007',
+            'new_gpu_launched':False,
+            'stable_release_modified':False,
+            'kernel_status':status,
+            'inventory_obtained':bool(inv.strip()),
+            'status_like_candidates':candidates,
+            'targeted_cli_supported':not (root/'targeted_not_supported.txt').exists(),
+          }
+          if (root/'targeted_results.json').exists():
+              summary['targeted_results']=json.loads((root/'targeted_results.json').read_text())
+          (root/'C005_KAGGLE_API_FORENSICS_SAFE.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-kaggle-api-forensics-${{ github.run_id }}
+          path: |
+            .c005-forensics/C005_KAGGLE_API_FORENSICS_SAFE.json
+            .c005-forensics/api_methods.txt
+            .c005-forensics/files_help.txt
+            .c005-forensics/files_inventory.txt
+            .c005-forensics/target_candidates.json
+            .c005-forensics/targeted_results.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No new GPU job launched.'
+          echo 'No stable release mutation.'
+          echo 'Only metadata/status/log-like recovery attempted.'
