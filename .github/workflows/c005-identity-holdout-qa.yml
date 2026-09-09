@@ -1,0 +1,109 @@
+name: C005 Identity Holdout QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/c005_identity_holdout_qa.py'
+      - '.github/workflows/c005-identity-holdout-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c005-identity-holdout-qa
+  cancel-in-progress: true
+
+jobs:
+  identity-holdout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install holdout dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'kaggle>=1.8.0' 'opencv-contrib-python-headless==4.10.0.84' 'numpy<2'
+          mkdir -p .c005-models
+          curl -fL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+            -o .c005-models/face_detection_yunet_2023mar.onnx
+          curl -fL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx \
+            -o .c005-models/face_recognition_sface_2021dec.onnx
+          test -s .c005-models/face_detection_yunet_2023mar.onnx
+          test -s .c005-models/face_recognition_sface_2021dec.onnx
+
+      - name: Download private C005 reference dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c005-private
+          mkdir -p .c005-private
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c005-private --unzip -q
+          ROOT="$(find .c005-private -type d -name C005_REFERENCES -print -quit)"
+          test -n "$ROOT"
+          echo "C005_ROOT=$ROOT" >> "$GITHUB_ENV"
+          test -f "$ROOT/private_manifest.json"
+
+      - name: Run private identity holdout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .c005-safe
+          python worker/c005_identity_holdout_qa.py \
+            --root "$C005_ROOT" \
+            --detector-model .c005-models/face_detection_yunet_2023mar.onnx \
+            --recognizer-model .c005-models/face_recognition_sface_2021dec.onnx \
+            --source-sha "$GITHUB_SHA" \
+            --output .c005-safe/C005_IDENTITY_HOLDOUT_SAFE.json
+
+      - name: Assert fail-closed result
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          p='.c005-safe/C005_IDENTITY_HOLDOUT_SAFE.json'
+          d=json.load(open(p))
+          assert d['candidate_id']=='MASTER_CLONE_CANDIDATE_005'
+          assert d['source_sha']==os.environ['GITHUB_SHA']
+          assert d['decision']=='IDENTITY_HOLDOUT_PASS'
+          assert d['raw_biometric_media_exported'] is False
+          assert d['face_embeddings_exported'] is False
+          assert d['similarity_values_exported'] is False
+          assert d['gpu_launch_allowed'] is False
+          assert d['stable_release_modified'] is False
+          assert d['next_stage']=='FINAL_EXACT_SHA_PREFLIGHT'
+          print('C005_IDENTITY_HOLDOUT_SAFE_EVIDENCE_VERIFIED')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-identity-holdout-${{ github.run_id }}
+          path: .c005-safe/C005_IDENTITY_HOLDOUT_SAFE.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No private media, hashes, embeddings, or similarity values are uploaded.'
+          echo 'GPU remains blocked after this workflow.'
+          echo 'Stable release remains unchanged.'
