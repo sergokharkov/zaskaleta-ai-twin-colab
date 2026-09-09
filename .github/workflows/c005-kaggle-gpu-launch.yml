@@ -1,0 +1,222 @@
+name: C005 Kaggle GPU Launch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-kaggle-gpu-launch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: c005-kaggle-gpu
+  cancel-in-progress: false
+
+jobs:
+  launch-c005:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_PRIVATE_DATASET: ${{ secrets.KAGGLE_PRIVATE_DATASET }}
+      CANDIDATE: MASTER_CLONE_CANDIDATE_005
+      REQUIRED_IMPORT_RUN: '34282040761'
+      REQUIRED_CPU_RUN: '34357173726'
+      REQUIRED_HOLDOUT_RUN: '34363701756'
+      REQUIRED_PREFLIGHT_RUN: '34368312529'
+      REQUIRED_PREFLIGHT_SHA: '75d254d09d91ddb8dfd6860c61def1fc0a084bc4'
+
+    steps:
+      - name: Require successful C005 gates and prevent duplicate GPU submission
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          repo=os.environ['GITHUB_REPOSITORY']
+          token=os.environ['GH_READ_TOKEN']
+          def get(path):
+              req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+                  headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return json.load(r)
+          head=get('branches/main')['commit']['sha']
+          if os.environ['GITHUB_SHA']!=head or os.environ['GITHUB_REF']!='refs/heads/main':
+              raise SystemExit('Stale or non-main C005 GPU launch blocked')
+          if os.environ['GITHUB_RUN_ATTEMPT']!='1':
+              raise SystemExit('GPU workflow retry blocked; inspect existing Kaggle job first')
+          required={
+            os.environ['REQUIRED_IMPORT_RUN']:'.github/workflows/c005-encrypted-reference-import.yml',
+            os.environ['REQUIRED_CPU_RUN']:'.github/workflows/c005-private-cpu-qa.yml',
+            os.environ['REQUIRED_HOLDOUT_RUN']:'.github/workflows/c005-identity-holdout-qa.yml',
+            os.environ['REQUIRED_PREFLIGHT_RUN']:'.github/workflows/c005-final-exact-sha-preflight.yml',
+          }
+          for rid,path in required.items():
+              r=get('actions/runs/'+rid)
+              if r.get('conclusion')!='success' or r.get('path')!=path or r.get('head_branch')!='main':
+                  raise SystemExit('Required C005 gate not successful: '+rid)
+          runs=get('actions/runs?head_sha='+head+'&per_page=100').get('workflow_runs') or []
+          prior=[r for r in runs if r.get('path')=='.github/workflows/c005-kaggle-gpu-launch.yml'
+                 and str(r.get('id'))!=os.environ['GITHUB_RUN_ID'] and int(r.get('id'))<int(os.environ['GITHUB_RUN_ID'])]
+          for r in prior:
+              jobs=get('actions/runs/'+str(r['id'])+'/jobs?per_page=100').get('jobs') or []
+              attempted=any(s.get('name')=='Launch C005 on free Kaggle GPU' and s.get('conclusion') not in (None,'skipped')
+                            for j in jobs for s in (j.get('steps') or []))
+              if attempted:
+                  raise SystemExit('Prior C005 GPU submission already attempted for this exact commit')
+          print('C005_REQUIRED_GATE_RUNS_VERIFIED')
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Exact-SHA source and ancestry preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$REQUIRED_PREFLIGHT_SHA" "$GITHUB_SHA"
+          python -m py_compile kaggle/autopilot_kernel_c005.py kaggle/verified_c005_entry.py worker/run_clone_v2_test.py
+          test -f content/c005_reference_manifest_v1.json
+          test -f worker/c005_private_cpu_qa.py
+          test -f worker/c005_identity_holdout_qa.py
+          echo "C005_GPU_SOURCE_SHA=$GITHUB_SHA"
+
+      - name: Install Kaggle client and ffmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet 'kaggle>=1.8.0'
+
+      - name: Verify private C005 assets remain present before GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"; test -n "$KAGGLE_USERNAME"; test -n "$KAGGLE_PRIVATE_DATASET"
+          rm -rf .c005-prelaunch-private && mkdir -p .c005-prelaunch-private
+          kaggle datasets download -d "$KAGGLE_PRIVATE_DATASET" -p .c005-prelaunch-private --unzip -q
+          for n in 53665.jpg 53666.jpg 53668.jpg 53669.jpg 54193.mp4 54194.mp4 54197.mp4 Zaskaleta_AI_Voice_Master.mp3 MVIMG_20260830_144834.jpg; do
+            find .c005-prelaunch-private -type f -name "$n" -print -quit | grep -q . || { echo "Missing private asset: $n"; exit 12; }
+          done
+          rm -rf .c005-prelaunch-private
+          echo 'C005_PRIVATE_ASSET_PRESENCE_VERIFIED'
+
+      - name: Build immutable C005 Kaggle source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .kaggle-c005 && mkdir -p .kaggle-c005
+          git archive --format=zip HEAD -o .kaggle-c005/source_bundle.zip
+          python - <<'PY'
+          import base64, hashlib, json, os, subprocess
+          from pathlib import Path
+          def sha(p):
+              h=hashlib.sha256()
+              with Path(p).open('rb') as f:
+                  for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+              return h.hexdigest()
+          source_sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          critical=[
+            'content/c005_reference_manifest_v1.json','content/master_clone_package.json','content/clone_reference_profile.json',
+            'content/talking_profile_v2.json','content/talking_temporal_guard_v1.json',
+            'worker/locate_clone_assets.py','worker/run_clone_v2_test.py','worker/generate_scene_speech.py',
+            'kaggle/auto_prepare.py','kaggle/prepare_models.py','kaggle/preflight.py',
+            'kaggle/autopilot_kernel_c005.py','kaggle/verified_c005_entry.py'
+          ]
+          identity={
+            'schema':'zaskaleta-c005-run-identity-v1',
+            'run_token':os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],
+            'source_sha':source_sha,'candidate_id':os.environ['CANDIDATE'],
+            'bundle_sha256':sha('.kaggle-c005/source_bundle.zip'),
+            'critical_source_hashes':{p:sha(p) for p in critical},
+            'required_gate_runs':{
+              'private_import':os.environ['REQUIRED_IMPORT_RUN'],'cpu_qa':os.environ['REQUIRED_CPU_RUN'],
+              'identity_holdout':os.environ['REQUIRED_HOLDOUT_RUN'],'exact_sha_preflight':os.environ['REQUIRED_PREFLIGHT_RUN']},
+            'auto_promote':False,'stable_release_modified':False
+          }
+          Path('.kaggle-c005/run_identity.json').write_text(json.dumps(identity,indent=2)+'\n')
+          entry=Path('kaggle/verified_c005_entry.py').read_text()
+          bundle_b64=base64.b64encode(Path('.kaggle-c005/source_bundle.zip').read_bytes()).decode('ascii')
+          boot=['import base64, json, runpy','from pathlib import Path',"p=Path('/kaggle/working/_c005_bootstrap')",'p.mkdir(parents=True, exist_ok=False)',"(p/'source_bundle.zip').write_bytes(base64.b64decode("+repr(bundle_b64)+"))","(p/'run_identity.json').write_text("+repr(json.dumps(identity))+", encoding='utf-8')","(p/'verified_c005_entry.py').write_text("+repr(entry)+", encoding='utf-8')","runpy.run_path(str(p/'verified_c005_entry.py'), run_name='__main__')"]
+          Path('.kaggle-c005/verified_c005_entry.py').write_text('\n'.join(boot)+'\n')
+          slug=f"zaskaleta-c005-{os.environ['GITHUB_RUN_ID']}"
+          meta={'id':f"{os.environ['KAGGLE_USERNAME']}/{slug}",'title':slug,'code_file':'verified_c005_entry.py','language':'python','kernel_type':'script','is_private':True,'enable_gpu':True,'enable_internet':True,'dataset_sources':[os.environ['KAGGLE_PRIVATE_DATASET'].strip()],'competition_sources':[],'kernel_sources':[]}
+          Path('.kaggle-c005/kernel-metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
+          PY
+
+      - name: Launch C005 on free Kaggle GPU
+        run: kaggle kernels push -p .kaggle-c005 --timeout 7200 --accelerator NvidiaTeslaT4
+
+      - name: Follow C005 render to terminal status
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${GITHUB_RUN_ID}"
+          deadline=$(( $(date +%s) + 6600 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            s="$(kaggle kernels status "$KERNEL" 2>&1 || true)"; echo "$s"
+            echo "$s" | grep -Eqi 'COMPLETE|COMPLETED' && exit 0
+            echo "$s" | grep -Eqi 'ERROR|CANCELLED|CANCELED|FAILED' && exit 1
+            sleep 20
+          done
+          echo 'Kaggle terminal-status timeout'
+          exit 1
+
+      - name: Download and stream-validate generated C005 output
+        shell: bash
+        run: |
+          set -euo pipefail
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${GITHUB_RUN_ID}"
+          rm -rf .c005-review .c005-export && mkdir -p .c005-review .c005-export
+          kaggle kernels output "$KERNEL" -p .c005-review -q
+          VIDEO="$(find .c005-review -type f -name 'CLONE_V2_TALKING_TEST.mp4' -print -quit)"
+          STATUS="$(find .c005-review -type f -name 'zaskaleta_c005_status.json' -print -quit)"
+          test -n "$VIDEO"; test -n "$STATUS"
+          python - "$STATUS" "$VIDEO" <<'PY'
+          import json, os, subprocess, sys
+          d=json.load(open(sys.argv[1]))
+          assert d.get('source_sha')==os.environ['GITHUB_SHA']
+          assert d.get('run_token')==os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+          assert d.get('candidate_id')==os.environ['CANDIDATE']
+          assert d.get('state')=='C005_RENDER_READY_FOR_MANUAL_REVIEW'
+          assert d.get('render_completed') is True
+          assert d.get('auto_promote') is False and d.get('stable_release_modified') is False
+          raw=subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type,duration,nb_frames','-of','json',sys.argv[2]],text=True)
+          p=json.loads(raw); fmt=float((p.get('format') or {}).get('duration') or 0); streams=p.get('streams') or []
+          v=[s for s in streams if s.get('codec_type')=='video']; a=[s for s in streams if s.get('codec_type')=='audio']
+          assert len(v)==1 and a
+          vd=float(v[0].get('duration') or fmt); ad=float(a[0].get('duration') or fmt); frames=int(v[0].get('nb_frames') or 0)
+          assert 7.5 <= vd <= 15.5
+          assert frames==0 or frames>=150
+          assert abs(vd-ad)<=0.40 and abs(fmt-vd)<=0.40
+          print(f'C005_OUTPUT_STREAM_QA_PASS video={vd:.3f}s audio={ad:.3f}s frames={frames}')
+          PY
+          cp "$VIDEO" .c005-export/MASTER_CLONE_CANDIDATE_005.mp4
+          cp "$STATUS" .c005-export/C005_SAFE_STATUS.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-clone-c005-review-${{ github.run_id }}
+          path: .c005-export/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'C005 remains candidate-only.'
+          echo 'No automatic promotion occurs.'
+          echo 'Stable release is not modified.'
