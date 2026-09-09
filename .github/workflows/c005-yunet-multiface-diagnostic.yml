@@ -14,7 +14,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -39,7 +39,7 @@ jobs:
           test "$(stat -c%s models/yunet.onnx)" -gt 100000
           test "$(stat -c%s models/sface.onnx)" -gt 1000000
 
-      - name: Track YuNet detections across frames 40 to 60
+      - name: Scan every recovered C005 frame for persistent multi-face evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -52,6 +52,8 @@ jobs:
           rec=cv2.FaceRecognizerSF.create('models/sface.onnx','')
           cap=cv2.VideoCapture(str(video))
           if not cap.isOpened(): raise SystemExit('video open failed')
+          frame_count=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+          if frame_count <= 0: raise SystemExit('invalid frame count')
 
           def read_frame(idx):
               cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
@@ -83,42 +85,49 @@ jobs:
           anchor=max(af,key=lambda f:float(f[2]*f[3]))
           anchor_emb=rec.feature(rec.alignCrop(anchor_frame,anchor))
 
-          rows=[]; multi_frames=[]; distinct_like_frames=[]
-          for idx in range(40,61):
+          multi_frames=[]; distinct_like_frames=[]; no_face_frames=[]; summary_rows=[]
+          for idx in range(frame_count):
               fr=read_frame(idx); h,w=fr.shape[:2]
               fs=sorted(detect(fr),key=lambda f:float(f[2]*f[3]),reverse=True)
-              row={'frame':idx,'raw_detection_count':len(fs),'detections':[]}
-              for rank,f in enumerate(fs,1):
-                  x,y,bw,bh=map(float,f[:4])
-                  emb=rec.feature(rec.alignCrop(fr,f))
-                  cos=float(rec.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE))
-                  row['detections'].append({
-                    'rank_by_area':rank,
-                    'detector_score':round(float(f[-1]),6),
-                    'area_ratio':round((bw*bh)/(w*h),6),
-                    'center':[round((x+bw/2)/w,6),round((y+bh/2)/h,6)],
-                    'sface_anchor_cosine':round(cos,6)
-                  })
+              if not fs:
+                  no_face_frames.append(idx)
+                  continue
+              row={'frame':idx,'raw_detection_count':len(fs)}
               if len(fs)>=2:
                   multi_frames.append(idx)
                   iou,contain,cd=pair_metrics(fs[0],fs[1],w,h)
-                  row['top2_pair_metrics']={'iou':round(iou,6),'intersection_over_smaller_box':round(contain,6),'normalized_center_distance':round(cd,6)}
+                  row['top2_pair_metrics']={
+                    'iou':round(iou,6),
+                    'intersection_over_smaller_box':round(contain,6),
+                    'normalized_center_distance':round(cd,6)
+                  }
+                  row['top2_sface_anchor_cosine']=[]
+                  for f in fs[:2]:
+                      emb=rec.feature(rec.alignCrop(fr,f))
+                      row['top2_sface_anchor_cosine'].append(round(float(rec.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE)),6))
                   # Conservative spatial evidence only: no deduplication and no gate weakening.
                   if iou < 0.35 and contain < 0.70 and cd > 0.05:
                       distinct_like_frames.append(idx)
-              rows.append(row)
+                  summary_rows.append(row)
+
           cap.release()
 
-          longest=0; cur=0; prev=None
-          for idx in distinct_like_frames:
-              if prev is not None and idx==prev+1: cur+=1
-              else: cur=1
-              longest=max(longest,cur); prev=idx
+          def longest_run(vals):
+              best=cur=0; prev=None
+              for idx in vals:
+                  cur=cur+1 if prev is not None and idx==prev+1 else 1
+                  best=max(best,cur); prev=idx
+              return best
+
+          longest_multi=longest_run(multi_frames)
+          longest_distinct=longest_run(distinct_like_frames)
+          persistent=longest_distinct>=3
 
           out={
-            'schema':'zaskaleta-c005-yunet-temporal-multiface-diagnostic-v1',
+            'schema':'zaskaleta-c005-yunet-temporal-multiface-diagnostic-v2',
             'source_recovery_run_id':'34382337207',
-            'frame_range':[40,60],
+            'frame_range':[0,frame_count-1],
+            'frame_count':frame_count,
             'yunet_score_threshold':0.70,
             'sface_temporal_threshold_reference':0.40,
             'required_single_face_policy':True,
@@ -127,11 +136,14 @@ jobs:
             'new_gpu_launched':False,
             'multi_detection_frames':multi_frames,
             'multi_detection_frame_count':len(multi_frames),
+            'longest_consecutive_multi_detection_run':longest_multi,
             'spatially_distinct_like_frames':distinct_like_frames,
             'spatially_distinct_like_frame_count':len(distinct_like_frames),
-            'longest_consecutive_spatially_distinct_like_run':longest,
-            'decision':'PERSISTENT_MULTIFACE_EVIDENCE' if longest>=3 else ('TRANSIENT_OR_AMBIGUOUS' if multi_frames else 'SINGLE_FACE_ONLY'),
-            'rows':rows
+            'longest_consecutive_spatially_distinct_like_run':longest_distinct,
+            'no_face_frames':no_face_frames,
+            'no_face_frame_count':len(no_face_frames),
+            'decision':'PERSISTENT_MULTIFACE_EVIDENCE' if persistent else ('TRANSIENT_OR_AMBIGUOUS' if multi_frames else 'SINGLE_FACE_ONLY'),
+            'multi_detection_details':summary_rows
           }
           Path('C005_YUNET_MULTIFACE_DIAG.json').write_text(json.dumps(out,indent=2)+'\n')
           print(json.dumps(out,indent=2))
