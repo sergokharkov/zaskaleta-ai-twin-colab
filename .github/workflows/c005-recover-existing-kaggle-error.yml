@@ -1,0 +1,98 @@
+name: C005 Recover Existing Kaggle Error
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-recover-existing-kaggle-error.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover-existing-c005:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      EXISTING_GPU_RUN_ID: '34373548007'
+      CANDIDATE: MASTER_CLONE_CANDIDATE_005
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Kaggle client
+        run: python -m pip install --quiet 'kaggle>=1.8.0'
+
+      - name: Inspect existing failed Kaggle kernel without relaunch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN"
+          test -n "$KAGGLE_USERNAME"
+          KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          STATUS="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
+          echo "$STATUS"
+          echo "$STATUS" | grep -Eqi 'ERROR|FAILED|CANCELLED|CANCELED|COMPLETE|COMPLETED' || {
+            echo 'Existing kernel is not terminal; refusing any new GPU launch.'
+            exit 2
+          }
+          mkdir -p .c005-recovery
+          set +e
+          kaggle kernels output "$KERNEL" -p .c005-recovery -q
+          rc=$?
+          set -e
+          echo "KAGGLE_OUTPUT_RC=$rc"
+          find .c005-recovery -maxdepth 4 -type f -printf '%P\n' | sort || true
+          test "$rc" -eq 0 || echo 'Kernel output download command failed; continuing to sanitized diagnosis.'
+
+      - name: Extract sanitized failure diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('.c005-recovery')
+          matches=list(root.rglob('zaskaleta_c005_status.json'))
+          out={
+            'schema':'zaskaleta-c005-existing-kaggle-recovery-v1',
+            'candidate_id':'MASTER_CLONE_CANDIDATE_005',
+            'existing_gpu_run_id':'34373548007',
+            'new_gpu_launched':False,
+            'stable_release_modified':False,
+            'private_media_exported':False,
+          }
+          if len(matches)==1:
+            d=json.loads(matches[0].read_text(encoding='utf-8'))
+            out.update({
+              'status_found':True,
+              'state':d.get('state'),
+              'render_started':d.get('render_started'),
+              'render_completed':d.get('render_completed'),
+              'error_type':d.get('error_type'),
+              'error':d.get('error'),
+              'promotion_allowed':d.get('promotion_allowed'),
+            })
+          else:
+            out.update({'status_found':False,'status_match_count':len(matches)})
+          Path('.c005-recovery/C005_EXISTING_ERROR_SAFE.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-existing-error-recovery-${{ github.run_id }}
+          path: .c005-recovery/C005_EXISTING_ERROR_SAFE.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No new GPU job is launched by this workflow.'
+          echo 'Existing failed C005 Kaggle job is inspected only.'
+          echo 'Stable release remains unchanged.'
