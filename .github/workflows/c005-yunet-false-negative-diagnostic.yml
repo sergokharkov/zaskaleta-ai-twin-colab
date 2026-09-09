@@ -1,0 +1,104 @@
+name: C005 YuNet False Negative Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-yunet-false-negative-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: c005-targeted-recovery-34382337207
+          path: recovered
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34382337207
+
+      - name: Install models
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet opencv-contrib-python-headless==4.10.0.84 numpy
+          mkdir -p models
+          curl -fL --retry 4 --retry-delay 3 'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx' -o models/yunet.onnx
+          curl -fL --retry 4 --retry-delay 3 'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx' -o models/sface.onnx
+          test "$(stat -c%s models/yunet.onnx)" -gt 100000
+          test "$(stat -c%s models/sface.onnx)" -gt 1000000
+
+      - name: Diagnose frames 100 and 199 without changing gate policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import cv2,json
+          import numpy as np
+          from pathlib import Path
+
+          video=list(Path('recovered').rglob('CLONE_V2_TALKING_TEST.mp4'))[0]
+          rec=cv2.FaceRecognizerSF.create('models/sface.onnx','')
+
+          cap=cv2.VideoCapture(str(video))
+          frames={}
+          for idx in [0,100,199]:
+              cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
+              ok,fr=cap.read()
+              if not ok: raise SystemExit(f'cannot read frame {idx}')
+              frames[idx]=fr
+          cap.release()
+
+          def detections(frame,score):
+              h,w=frame.shape[:2]
+              det=cv2.FaceDetectorYN.create('models/yunet.onnx','',(w,h),score,0.3,5000)
+              _,faces=det.detect(frame)
+              return [] if faces is None else [np.asarray(f,dtype=np.float32) for f in faces]
+
+          anchor_faces=detections(frames[0],0.75)
+          if not anchor_faces: raise SystemExit('anchor face missing at frame 0')
+          anchor=max(anchor_faces,key=lambda f:float(f[2]*f[3]))
+          anchor_emb=rec.feature(rec.alignCrop(frames[0],anchor))
+
+          out={'schema':'zaskaleta-c005-yunet-false-negative-diagnostic-v1','source_run':'34382337207','gate_policy_changed':False,'required_pass_ratio':0.89,'frames':{}}
+          for idx in [100,199]:
+              rows=[]
+              for score in [0.75,0.70,0.65,0.60,0.55]:
+                  fs=detections(frames[idx],score)
+                  row={'score_threshold':score,'face_count':len(fs)}
+                  if fs:
+                      f=max(fs,key=lambda x:float(x[2]*x[3]))
+                      h,w=frames[idx].shape[:2]
+                      area=float(f[2]*f[3])/(w*h)
+                      emb=rec.feature(rec.alignCrop(frames[idx],f))
+                      cosine=float(rec.match(anchor_emb,emb,cv2.FaceRecognizerSF_FR_COSINE))
+                      row.update({'largest_face_area_ratio':round(area,6),'sface_anchor_cosine':round(cosine,6),'detector_score':round(float(f[-1]),6)})
+                  rows.append(row)
+              out['frames'][str(idx)]=rows
+          Path('C005_YUNET_FALSE_NEGATIVE_DIAG.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-yunet-false-negative-diag-${{ github.run_id }}
+          path: C005_YUNET_FALSE_NEGATIVE_DIAG.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Diagnostic only. No GPU launched.'
+          echo 'Gate pass ratio remains 0.89; stable release unchanged.'
