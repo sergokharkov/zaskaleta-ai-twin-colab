@@ -1,0 +1,98 @@
+name: C005 Final Exact SHA Preflight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-final-exact-sha-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c005-final-exact-sha-preflight
+  cancel-in-progress: true
+
+jobs:
+  exact-sha-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify exact source SHA and required C005 pipeline files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$GITHUB_SHA"
+          test -f content/c005_reference_manifest_v1.json
+          test -f worker/validate_c005_reference_manifest.py
+          test -f worker/c005_private_cpu_qa.py
+          test -f worker/c005_identity_holdout_qa.py
+          test -f .github/workflows/c005-encrypted-reference-import.yml
+          test -f .github/workflows/c005-private-cpu-qa.yml
+          test -f .github/workflows/c005-identity-holdout-qa.yml
+          python -m py_compile \
+            worker/validate_c005_reference_manifest.py \
+            worker/c005_private_cpu_qa.py \
+            worker/c005_identity_holdout_qa.py
+          echo "C005_EXACT_SHA=$ACTUAL_SHA"
+
+      - name: Assert public manifest remains fail-closed before GPU handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .c005-safe
+          python worker/validate_c005_reference_manifest.py \
+            --manifest content/c005_reference_manifest_v1.json \
+            --output .c005-safe/C005_MANIFEST_PREFLIGHT.json
+          python - <<'PY'
+          import json, os
+          d=json.load(open('.c005-safe/C005_MANIFEST_PREFLIGHT.json'))
+          assert d['candidate_id']=='MASTER_CLONE_CANDIDATE_005'
+          assert d['gpu_launch_allowed'] is False
+          assert d['stable_release_modified'] is False
+          print('C005_PUBLIC_MANIFEST_FAIL_CLOSED_VERIFIED')
+          PY
+
+      - name: Write sanitized exact-SHA handoff evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          out={
+            'schema':'zaskaleta-c005-exact-sha-preflight-v1',
+            'candidate_id':'MASTER_CLONE_CANDIDATE_005',
+            'source_sha':os.environ['GITHUB_SHA'],
+            'decision':'EXACT_SHA_PREFLIGHT_PASS',
+            'private_import_required_before_gpu':True,
+            'two_cpu_qa_passes_required_before_gpu':True,
+            'identity_holdout_required_before_gpu':True,
+            'gpu_launch_allowed':False,
+            'manual_gpu_handoff_required':True,
+            'auto_promotion':False,
+            'stable_release_modified':False,
+            'next_stage':'C005_GPU_HANDOFF_PREPARATION'
+          }
+          open('.c005-safe/C005_EXACT_SHA_PREFLIGHT_SAFE.json','w').write(json.dumps(out,indent=2)+'\n')
+          print('C005_EXACT_SHA_PREFLIGHT_PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c005-exact-sha-preflight-${{ github.run_id }}
+          path: .c005-safe/C005_EXACT_SHA_PREFLIGHT_SAFE.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No private C005 media or biometric evidence is exported.'
+          echo 'GPU is not launched by this workflow.'
+          echo 'Stable release remains unchanged.'
