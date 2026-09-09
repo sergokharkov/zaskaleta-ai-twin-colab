@@ -1,0 +1,173 @@
+name: C005 Recovered YuNet SFace QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/c005-recovered-yunet-sface-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate-recovered-c005:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download recovered C005 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: c005-targeted-recovery-34382337207
+          path: recovered
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 34382337207
+
+      - name: Install OpenCV and verified face models
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet opencv-contrib-python-headless==4.10.0.84 numpy
+          mkdir -p models
+          curl -fL --retry 4 --retry-delay 3 \
+            'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx' \
+            -o models/face_detection_yunet_2023mar.onnx
+          curl -fL --retry 4 --retry-delay 3 \
+            'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx' \
+            -o models/face_recognition_sface_2021dec.onnx
+          test "$(stat -c%s models/face_detection_yunet_2023mar.onnx)" -gt 100000
+          test "$(stat -c%s models/face_recognition_sface_2021dec.onnx)" -gt 1000000
+          python - <<'PY'
+          import cv2
+          cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),0.75,0.3,5000)
+          cv2.FaceRecognizerSF.create('models/face_recognition_sface_2021dec.onnx','')
+          print('MODEL_PARSE_OK')
+          PY
+
+      - name: Run YuNet SFace temporal QA without weakening policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import cv2, json, math, hashlib
+          from pathlib import Path
+          import numpy as np
+
+          roots=list(Path('recovered').rglob('CLONE_V2_TALKING_TEST.mp4'))
+          if len(roots) != 1:
+              raise SystemExit(f'expected exactly one recovered MP4, got {len(roots)}')
+          video=roots[0]
+          detector=cv2.FaceDetectorYN.create('models/face_detection_yunet_2023mar.onnx','',(320,320),0.75,0.3,5000)
+          recognizer=cv2.FaceRecognizerSF.create('models/face_recognition_sface_2021dec.onnx','')
+
+          cap=cv2.VideoCapture(str(video))
+          if not cap.isOpened(): raise SystemExit('video open failed')
+          n=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+          fps=float(cap.get(cv2.CAP_PROP_FPS) or 0)
+          sample_count=9
+          idxs=sorted({int(round(i*(n-1)/max(sample_count-1,1))) for i in range(sample_count)})
+          samples=[]; embeddings=[]; prev=None; geometry_failures=[]
+
+          for idx in idxs:
+              cap.set(cv2.CAP_PROP_POS_FRAMES,idx)
+              ok,frame=cap.read()
+              s={'frame':idx}
+              if not ok or frame is None:
+                  s.update(passed=False,reason='frame_read_failed'); samples.append(s); continue
+              h,w=frame.shape[:2]
+              detector.setInputSize((w,h))
+              _,faces=detector.detect(frame)
+              if faces is None or len(faces)==0:
+                  s.update(passed=False,reason='no_face_detected',face_count=0); samples.append(s); prev=None; continue
+              if len(faces)>1:
+                  faces=sorted(faces,key=lambda f:float(f[2]*f[3]),reverse=True)
+              f=np.asarray(faces[0],dtype=np.float32)
+              x,y,bw,bh=map(float,f[:4])
+              area=(bw*bh)/(w*h)
+              center=((x+bw/2)/w,(y+bh/2)/h)
+              aligned=recognizer.alignCrop(frame,f)
+              emb=recognizer.feature(aligned)
+              sharp=float(cv2.Laplacian(cv2.cvtColor(aligned,cv2.COLOR_BGR2GRAY),cv2.CV_64F).var())
+              fails=[]
+              if not (0.008 <= area <= 0.36): fails.append('face_size_out_of_range')
+              if sharp < 16.0: fails.append('face_too_soft')
+              if prev is not None:
+                  pc,pa=prev
+                  jump=math.dist(center,pc)
+                  mult=max(area,pa)/min(area,pa) if min(area,pa)>0 else 999
+                  s['normalized_center_jump']=round(jump,6)
+                  s['adjacent_area_ratio_multiplier']=round(mult,6)
+                  if jump>0.30: fails.append('face_center_jump_exceeded'); geometry_failures.append({'frame':idx,'reason':'face_center_jump_exceeded'})
+                  if mult>2.20: fails.append('face_scale_jump_exceeded'); geometry_failures.append({'frame':idx,'reason':'face_scale_jump_exceeded'})
+              prev=(center,area)
+              embeddings.append((idx,emb))
+              s.update(face_count=int(len(faces)),face_area_ratio=round(area,6),face_sharpness=round(sharp,3),normalized_center=[round(center[0],6),round(center[1],6)],passed=(len(fails)==0),reason='ok' if not fails else fails[0],failures=fails)
+              samples.append(s)
+          cap.release()
+
+          # SFace is used here only for same-render temporal consistency, not for identifying a person.
+          if embeddings:
+              anchor=embeddings[0][1]
+              score_by_frame={}
+              for idx,emb in embeddings:
+                  score=float(recognizer.match(anchor,emb,cv2.FaceRecognizerSF_FR_COSINE))
+                  score_by_frame[idx]=score
+              for s in samples:
+                  if s['frame'] in score_by_frame:
+                      s['sface_anchor_cosine']=round(score_by_frame[s['frame']],6)
+                      if score_by_frame[s['frame']] < 0.40:
+                          s.setdefault('failures',[]).append('sface_temporal_mismatch')
+                          s['passed']=False
+                          s['reason']='sface_temporal_mismatch'
+
+          passed_samples=sum(1 for s in samples if s.get('passed'))
+          ratio=passed_samples/len(samples) if samples else 0
+          passed=(len(samples)>0 and ratio>=0.89 and not geometry_failures)
+          digest=hashlib.sha256(video.read_bytes()).hexdigest()
+          out={
+            'schema':'zaskaleta-c005-recovered-yunet-sface-temporal-qa-v1',
+            'candidate_id':'MASTER_CLONE_CANDIDATE_005',
+            'source_recovery_run_id':'34382337207',
+            'video_sha256':digest,
+            'frame_count':n,
+            'fps':fps,
+            'sample_count':len(samples),
+            'passed_samples':passed_samples,
+            'pass_ratio':round(ratio,6),
+            'required_pass_ratio':0.89,
+            'geometry_failures':geometry_failures,
+            'sface_temporal_threshold':0.40,
+            'structural_detector':'OpenCV YuNet',
+            'temporal_embedding_model':'OpenCV SFace',
+            'sface_is_identity_claim':False,
+            'passed':passed,
+            'decision':'PASS_RECOVERED_YUNET_SFACE_QA' if passed else 'FAIL_RECOVERED_YUNET_SFACE_QA',
+            'stable_release_modified':False,
+            'auto_promote':False,
+            'samples':samples,
+          }
+          Path('C005_RECOVERED_YUNET_SFACE_QA.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          if not passed: raise SystemExit(1)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c005-recovered-yunet-sface-qa-${{ github.run_id }}
+          path: C005_RECOVERED_YUNET_SFACE_QA.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No GPU launched.'
+          echo 'No stable release mutation.'
+          echo 'No threshold weakening: required pass ratio remains 0.89.'
