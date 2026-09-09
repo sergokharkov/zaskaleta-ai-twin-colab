@@ -13,7 +13,7 @@ permissions:
 jobs:
   recover-existing-c005:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 8
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
@@ -34,37 +34,48 @@ jobs:
           test -n "$KAGGLE_API_TOKEN"
           test -n "$KAGGLE_USERNAME"
           KERNEL="${KAGGLE_USERNAME}/zaskaleta-c005-${EXISTING_GPU_RUN_ID}"
+          mkdir -p .c005-recovery
           STATUS="$(kaggle kernels status "$KERNEL" 2>&1 || true)"
-          echo "$STATUS"
+          printf '%s\n' "$STATUS" | tee .c005-recovery/kernel_terminal_status.txt
           echo "$STATUS" | grep -Eqi 'ERROR|FAILED|CANCELLED|CANCELED|COMPLETE|COMPLETED' || {
             echo 'Existing kernel is not terminal; refusing any new GPU launch.'
             exit 2
           }
-          mkdir -p .c005-recovery
           set +e
-          kaggle kernels output "$KERNEL" -p .c005-recovery -q
+          timeout --signal=TERM --kill-after=10s 90s kaggle kernels output "$KERNEL" -p .c005-recovery -q
           rc=$?
           set -e
-          echo "KAGGLE_OUTPUT_RC=$rc"
+          echo "KAGGLE_OUTPUT_RC=$rc" | tee .c005-recovery/kaggle_output_rc.txt
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo 'KAGGLE_OUTPUT_TIMED_OUT=true' | tee .c005-recovery/kaggle_output_timeout.txt
+          fi
           find .c005-recovery -maxdepth 4 -type f -printf '%P\n' | sort || true
-          test "$rc" -eq 0 || echo 'Kernel output download command failed; continuing to sanitized diagnosis.'
+          echo 'Existing kernel inspection finished; no GPU relaunch performed.'
 
       - name: Extract sanitized failure diagnosis
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .c005-recovery
           python - <<'PY'
           import json
           from pathlib import Path
           root=Path('.c005-recovery')
           matches=list(root.rglob('zaskaleta_c005_status.json'))
+          terminal=(root/'kernel_terminal_status.txt').read_text(encoding='utf-8',errors='replace').strip() if (root/'kernel_terminal_status.txt').exists() else None
+          rc_text=(root/'kaggle_output_rc.txt').read_text(encoding='utf-8',errors='replace').strip() if (root/'kaggle_output_rc.txt').exists() else None
+          timed_out=(root/'kaggle_output_timeout.txt').exists()
           out={
-            'schema':'zaskaleta-c005-existing-kaggle-recovery-v1',
+            'schema':'zaskaleta-c005-existing-kaggle-recovery-v2',
             'candidate_id':'MASTER_CLONE_CANDIDATE_005',
             'existing_gpu_run_id':'34373548007',
             'new_gpu_launched':False,
             'stable_release_modified':False,
             'private_media_exported':False,
+            'kernel_terminal_status':terminal,
+            'kaggle_output_command':rc_text,
+            'kaggle_output_timed_out':timed_out,
           }
           if len(matches)==1:
             d=json.loads(matches[0].read_text(encoding='utf-8'))
@@ -78,12 +89,17 @@ jobs:
               'promotion_allowed':d.get('promotion_allowed'),
             })
           else:
-            out.update({'status_found':False,'status_match_count':len(matches)})
+            out.update({
+              'status_found':False,
+              'status_match_count':len(matches),
+              'diagnosis':'Kaggle kernel is terminal ERROR but its output endpoint did not yield the C005 status file within the bounded recovery window.' if timed_out else 'Kaggle kernel is terminal but no unique C005 status file was recovered.'
+            })
           Path('.c005-recovery/C005_EXISTING_ERROR_SAFE.json').write_text(json.dumps(out,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
           print(json.dumps(out,ensure_ascii=False,indent=2))
           PY
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: c005-existing-error-recovery-${{ github.run_id }}
           path: .c005-recovery/C005_EXISTING_ERROR_SAFE.json
