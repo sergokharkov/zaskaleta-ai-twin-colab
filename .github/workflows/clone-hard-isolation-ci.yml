@@ -28,7 +28,8 @@ jobs:
             --exclude='clone-hard-isolation-ci.yml' --exclude-dir='.git' .; then
             echo 'Cross-project reference detected'; exit 61
           fi
-          if grep -RniE 'dataset_list\(user=|while page <= 20' .github/workflows; then
+          if grep -RniE 'dataset_list\(user=|while page <= 20' \
+            --exclude='clone-hard-isolation-ci.yml' .github/workflows; then
             echo 'Account-wide Kaggle discovery detected'; exit 62
           fi
       - name: Credential boundary declaration gate
