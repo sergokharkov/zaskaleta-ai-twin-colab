@@ -1,0 +1,46 @@
+name: AI Clone Hard Isolation CI
+on:
+  push:
+    branches: ['hardening/ai-clone-isolation']
+  pull_request:
+    paths:
+      - 'worker/**'
+      - 'tests/test_clone_hard_isolation.py'
+      - '.github/workflows/**'
+      - 'content/**'
+permissions:
+  contents: read
+jobs:
+  isolation-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Static and negative runtime isolation tests
+        run: python -m unittest -v tests.test_clone_hard_isolation
+      - name: Reject cross-project identifiers and account-wide discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RniE 'zaskaleta-media|telegram-info|zaskaleta[ _-]?tv|repository_dispatch|workflow_call' \
+            --exclude='clone-hard-isolation-ci.yml' --exclude-dir='.git' .; then
+            echo 'Cross-project reference detected'; exit 61
+          fi
+          if grep -RniE 'dataset_list\(user=|while page <= 20' .github/workflows; then
+            echo 'Account-wide Kaggle discovery detected'; exit 62
+          fi
+      - name: Credential boundary declaration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          p=json.load(open('content/clone_isolation_boundaries_v1.json', encoding='utf-8'))
+          assert p['status'] == 'NOT_VERIFIED'
+          for provider in ('kaggle','s3','google_drive','runpod'):
+              assert provider in p['providers']
+              assert 'credential_scope' in p['providers'][provider]
+          print('ISOLATION_BOUNDARY_DECLARATION_OK')
+          PY
