@@ -137,14 +137,25 @@ class RuntimeAttestationTests(unittest.TestCase):
     def test_provider_probes_are_scoped_and_non_destructive(self):
         from runpod.runtime_attestation import probe_canonical_read, probe_controlled_write_inside
 
+        class FakeBody:
+            def __init__(self):
+                self.closed = False
+
+            def read(self, size=-1):
+                return b'{'
+
+            def close(self):
+                self.closed = True
+
         class FakeS3:
             def __init__(self):
-                self.head_calls = []
+                self.get_calls = []
                 self.put_calls = []
+                self.body = FakeBody()
 
-            def head_object(self, **kwargs):
-                self.head_calls.append(kwargs)
-                return {'ContentLength': 1}
+            def get_object(self, **kwargs):
+                self.get_calls.append(kwargs)
+                return {'Body': self.body}
 
             def put_object(self, **kwargs):
                 self.put_calls.append(kwargs)
@@ -165,9 +176,11 @@ class RuntimeAttestationTests(unittest.TestCase):
 
         self.assertTrue(read_result['provider_read_verified'])
         self.assertEqual(
-            client.head_calls[0]['Key'],
+            client.get_calls[0]['Key'],
             'MASTER_CLONE/MEMORY/storage_migration_manifest_v1.json',
         )
+        self.assertEqual(client.get_calls[0]['Range'], 'bytes=0-0')
+        self.assertTrue(client.body.closed)
         self.assertTrue(write_result['provider_write_inside_namespace_verified'])
         self.assertEqual(
             client.put_calls[0]['Key'],
