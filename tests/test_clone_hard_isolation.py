@@ -18,6 +18,15 @@ class StaticIsolationTests(unittest.TestCase):
     def test_isolation_policy_exists(self):
         self.assertTrue((ROOT / 'worker/clone_isolation.py').is_file())
 
+    def test_runpod_startup_requires_drive_free_runtime_attestation(self):
+        attestation = (ROOT / 'runpod/runtime_attestation.py').read_text(encoding='utf-8')
+        start_api = (ROOT / 'runpod/start_api.sh').read_text(encoding='utf-8')
+        readiness = (ROOT / 'runpod/connection_readiness.py').read_text(encoding='utf-8')
+
+        self.assertIn("add_argument('--require-drive-free'", attestation)
+        self.assertIn("runtime_attestation.py\" --require-drive-free", start_api)
+        self.assertIn("'runpod/runtime_attestation.py'", readiness)
+
     def test_runtime_attestation_cli_requires_explicit_provider_probes(self):
         p = ROOT / 'runpod/runtime_attestation.py'
         text = p.read_text(encoding='utf-8')
