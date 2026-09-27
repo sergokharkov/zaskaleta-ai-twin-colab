@@ -106,5 +106,47 @@ class RuntimeAttestationTests(unittest.TestCase):
         ):
             self.assertNotIn(secret, serialized)
 
+
+    def test_provider_probes_are_scoped_and_non_destructive(self):
+        from runpod.runtime_attestation import probe_canonical_read, probe_controlled_write_inside
+
+        class FakeS3:
+            def __init__(self):
+                self.head_calls = []
+                self.put_calls = []
+
+            def head_object(self, **kwargs):
+                self.head_calls.append(kwargs)
+                return {'ContentLength': 1}
+
+            def put_object(self, **kwargs):
+                self.put_calls.append(kwargs)
+                return {'ETag': '"test"'}
+
+        client = FakeS3()
+        with mock.patch.dict(os.environ, {'AI_TWIN_STORAGE_BUCKET': 'canonical-bucket'}, clear=True):
+            read_result = probe_canonical_read(
+                client,
+                'canonical-bucket',
+                'MASTER_CLONE/MEMORY/storage_migration_manifest_v1.json',
+            )
+            write_result = probe_controlled_write_inside(
+                client,
+                'canonical-bucket',
+                probe_id='unit-test-probe',
+            )
+
+        self.assertTrue(read_result['provider_read_verified'])
+        self.assertEqual(
+            client.head_calls[0]['Key'],
+            'MASTER_CLONE/MEMORY/storage_migration_manifest_v1.json',
+        )
+        self.assertTrue(write_result['provider_write_inside_namespace_verified'])
+        self.assertEqual(
+            client.put_calls[0]['Key'],
+            'MASTER_CLONE/TESTS/ISOLATION_PROBES/unit-test-probe.json',
+        )
+        self.assertNotIn('DeleteObject', json.dumps(client.put_calls))
+
 if __name__ == '__main__':
     unittest.main()
