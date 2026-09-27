@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "status": "NOT_VERIFIED",
+  "rule": "Code allowlists are defense in depth only. VERIFIED requires provider-enforced Clone-only credentials/identity and successful negative-access evidence.",
+  "providers": {
+    "kaggle": {
+      "required_identity": "dedicated AI Clone Kaggle account/identity if Kaggle credentials cannot be dataset-scoped",
+      "credential_scope": "UNVERIFIED_ACCOUNT_WIDE",
+      "code_scope": "single AI_CLONE_KAGGLE_DATASET; account-wide enumeration prohibited"
+    },
+    "s3": {
+      "required_identity": "dedicated AI Clone access key/role restricted by provider IAM to the AI Clone bucket/prefix only",
+      "credential_scope": "UNVERIFIED",
+      "code_scope": "AI_TWIN_STORAGE_BUCKET + MASTER_CLONE/ required; runtime materializer fails closed on bucket/key scope before provider access",
+      "runtime_attestation": "runpod/runtime_attestation.py: redacted provider classification, drive-free runtime gate, explicit canonical GET and controlled in-namespace WRITE probes",
+      "negative_authorization": "NOT_VERIFIED: foreign bucket, foreign prefix, and outside-write still require provider-side proof with the production identity",
+      "secondary_backup": "NOT_VERIFIED"
+    },
+    "google_drive": {
+      "required_identity": "dedicated AI Clone service identity with access only to the AI Clone folder/shared drive",
+      "credential_scope": "UNVERIFIED_ACCOUNT_WIDE_OR_UNKNOWN",
+      "code_scope": "AI_CLONE_DRIVE_FOLDER_ID required; fail closed"
+    },
+    "runpod": {
+      "required_identity": "dedicated AI Clone Runpod API identity/project boundary with no access to non-Clone resources",
+      "credential_scope": "UNVERIFIED_ACCOUNT_WIDE_OR_UNKNOWN",
+      "code_scope": "AI_CLONE_RUNPOD_NAMESPACE required; fail closed"
+    }
+  },
+  "promotion_allowed": false
+}
