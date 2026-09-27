@@ -8,6 +8,7 @@ and whether forbidden Google Drive runtime variables are present.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -21,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from worker.clone_isolation import assert_clone_s3_scope
+from worker.materialize_clone_runtime_from_s3 import s3_client
 
 CONFIG = ROOT / 'content' / 'storage_config.json'
 CANONICAL_NAMESPACE = 'MASTER_CLONE/'
@@ -163,7 +165,16 @@ def probe_controlled_write_inside(client, bucket: str, *, probe_id: str) -> dict
     }
 
 def main() -> int:
+    ap = argparse.ArgumentParser(
+        description='Emit redacted AI Clone runtime/provider attestation'
+    )
+    ap.add_argument('--probe-read', action='store_true')
+    ap.add_argument('--probe-write-inside', action='store_true')
+    ap.add_argument('--probe-id', default='')
+    args = ap.parse_args()
+
     cfg = json.loads(CONFIG.read_text(encoding='utf-8'))
+    canonical = cfg.get('canonical_storage') or {}
     runtime = cfg.get('runtime') or {}
     mount_path = Path(
         os.environ.get('AI_TWIN_STORAGE', '').strip()
@@ -175,6 +186,52 @@ def main() -> int:
         os.environ,
         mount_path=mount_path,
         revision=detect_revision(),
+    )
+
+    wants_network_probe = args.probe_read or args.probe_write_inside
+    if not wants_network_probe:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    report['network_action_attempted'] = True
+    if not report['runtime_credentials_complete']:
+        report['provider_probe_error'] = 'runtime_storage_env_incomplete'
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
+
+    if args.probe_write_inside and not args.probe_id:
+        report['provider_probe_error'] = 'probe_id_required_for_controlled_write'
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
+
+    bucket_env = canonical.get('bucket_env')
+    manifest_key = canonical.get('migration_manifest_key')
+    bucket = os.environ.get(bucket_env, '').strip() if isinstance(bucket_env, str) else ''
+
+    try:
+        client = s3_client(cfg)
+        if args.probe_read:
+            report.update(probe_canonical_read(client, bucket, manifest_key))
+        if args.probe_write_inside:
+            report.update(
+                probe_controlled_write_inside(
+                    client,
+                    bucket,
+                    probe_id=args.probe_id,
+                )
+            )
+    except Exception as exc:
+        report['provider_probe_error_class'] = type(exc).__name__
+        report['provider_probe_error_redacted'] = True
+        report['secret_values_exposed'] = False
+        report['hard_isolation_verified'] = False
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 3
+
+    report['note'] = (
+        'Requested in-scope provider probes completed. Hard isolation remains '
+        'NOT VERIFIED until provider identity and all required negative '
+        'authorization checks are independently proven.'
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
