@@ -47,5 +47,18 @@ class RuntimeNegativeAccessTests(unittest.TestCase):
             with self.assertRaises(self.IsolationError):
                 self.assert_clone_resource('s3', 'anything')
 
+    def test_canonical_s3_scope_uses_runtime_contract(self):
+        from worker.clone_isolation import assert_clone_s3_scope
+
+        with mock.patch.dict(os.environ, {'AI_TWIN_STORAGE_BUCKET': 'canonical-bucket'}, clear=True):
+            self.assertEqual(
+                assert_clone_s3_scope('canonical-bucket', 'MASTER_CLONE/MEMORY/object.bin'),
+                'MASTER_CLONE/MEMORY/object.bin',
+            )
+            with self.assertRaises(self.IsolationError):
+                assert_clone_s3_scope('other-bucket', 'MASTER_CLONE/MEMORY/object.bin')
+            with self.assertRaises(self.IsolationError):
+                assert_clone_s3_scope('canonical-bucket', 'OTHER_PROJECT/object.bin')
+
 if __name__ == '__main__':
     unittest.main()
