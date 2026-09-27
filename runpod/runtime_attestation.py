@@ -129,7 +129,18 @@ def build_static_attestation(
 
 def probe_canonical_read(client, bucket: str, manifest_key: str) -> dict:
     key = assert_clone_s3_scope(bucket, manifest_key)
-    client.head_object(Bucket=bucket, Key=key)
+    response = client.get_object(Bucket=bucket, Key=key, Range='bytes=0-0')
+    body = response.get('Body')
+    if body is None:
+        raise RuntimeError('canonical read response missing Body')
+    try:
+        chunk = body.read(1)
+        if not chunk:
+            raise RuntimeError('canonical read returned no data')
+    finally:
+        close = getattr(body, 'close', None)
+        if callable(close):
+            close()
     return {
         'provider_read_verified': True,
         'network_action_performed': True,
