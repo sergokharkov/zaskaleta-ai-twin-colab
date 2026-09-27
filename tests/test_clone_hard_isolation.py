@@ -16,6 +16,12 @@ class StaticIsolationTests(unittest.TestCase):
     def test_isolation_policy_exists(self):
         self.assertTrue((ROOT / 'worker/clone_isolation.py').is_file())
 
+    def test_runtime_materializer_enforces_canonical_s3_scope(self):
+        p = ROOT / 'worker/materialize_clone_runtime_from_s3.py'
+        text = p.read_text(encoding='utf-8')
+        self.assertIn('assert_clone_s3_scope(bucket, manifest_key)', text)
+        self.assertIn('assert_clone_s3_scope(bucket, encrypted_key)', text)
+
 class RuntimeNegativeAccessTests(unittest.TestCase):
     def setUp(self):
         from worker.clone_isolation import IsolationError, assert_clone_resource
