@@ -171,6 +171,7 @@ def main() -> int:
     ap.add_argument('--probe-read', action='store_true')
     ap.add_argument('--probe-write-inside', action='store_true')
     ap.add_argument('--probe-id', default='')
+    ap.add_argument('--require-drive-free', action='store_true')
     args = ap.parse_args()
 
     cfg = json.loads(CONFIG.read_text(encoding='utf-8'))
@@ -187,6 +188,11 @@ def main() -> int:
         mount_path=mount_path,
         revision=detect_revision(),
     )
+
+    if args.require_drive_free and not report['drive_runtime_env_clear']:
+        report['runtime_attestation_error'] = 'active_drive_runtime_environment'
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 4
 
     wants_network_probe = args.probe_read or args.probe_write_inside
     if not wants_network_probe:
