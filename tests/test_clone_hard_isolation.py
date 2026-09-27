@@ -50,8 +50,15 @@ class RuntimeNegativeAccessTests(unittest.TestCase):
         self.IsolationError = IsolationError
         self.assert_clone_resource = assert_clone_resource
 
+    def test_allows_canonical_s3_bucket_resource(self):
+        with mock.patch.dict(os.environ, {'AI_TWIN_STORAGE_BUCKET':'ai-clone-private'}, clear=True):
+            self.assertEqual(
+                self.assert_clone_resource('s3', 'ai-clone-private'),
+                'ai-clone-private',
+            )
+
     def test_rejects_foreign_s3_bucket(self):
-        with mock.patch.dict(os.environ, {'AI_CLONE_S3_BUCKET':'ai-clone-private'}, clear=False):
+        with mock.patch.dict(os.environ, {'AI_TWIN_STORAGE_BUCKET':'ai-clone-private'}, clear=False):
             with self.assertRaises(self.IsolationError):
                 self.assert_clone_resource('s3', 'other-project')
 
