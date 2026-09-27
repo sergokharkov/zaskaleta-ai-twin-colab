@@ -18,6 +18,17 @@ class StaticIsolationTests(unittest.TestCase):
     def test_isolation_policy_exists(self):
         self.assertTrue((ROOT / 'worker/clone_isolation.py').is_file())
 
+    def test_runtime_attestation_cli_requires_explicit_provider_probes(self):
+        p = ROOT / 'runpod/runtime_attestation.py'
+        text = p.read_text(encoding='utf-8')
+        self.assertIn("add_argument('--probe-read'", text)
+        self.assertIn("add_argument('--probe-write-inside'", text)
+        self.assertIn("add_argument('--probe-id'", text)
+        self.assertIn('args.probe_read', text)
+        self.assertIn('args.probe_write_inside', text)
+        self.assertIn('s3_client(cfg)', text)
+        self.assertNotIn('delete_object(', text)
+
     def test_runtime_materializer_enforces_canonical_s3_scope(self):
         p = ROOT / 'worker/materialize_clone_runtime_from_s3.py'
         text = p.read_text(encoding='utf-8')
