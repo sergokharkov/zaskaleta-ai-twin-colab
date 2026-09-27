@@ -25,7 +25,7 @@ from worker.clone_isolation import assert_clone_s3_scope
 CONFIG = ROOT / 'content' / 'storage_config.json'
 CANONICAL_NAMESPACE = 'MASTER_CLONE/'
 PROBE_PREFIX = 'MASTER_CLONE/TESTS/ISOLATION_PROBES'
-PROBE_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,128}
+PROBE_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 DRIVE_RUNTIME_ENV_NAMES = (
     'AI_TWIN_DRIVE_SYNC',
     'AI_TWIN_DRIVE_FOLDER_ID',
