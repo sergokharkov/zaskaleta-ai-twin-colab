@@ -146,7 +146,7 @@ class RuntimeAttestationTests(unittest.TestCase):
             client.put_calls[0]['Key'],
             'MASTER_CLONE/TESTS/ISOLATION_PROBES/unit-test-probe.json',
         )
-        self.assertNotIn('DeleteObject', json.dumps(client.put_calls))
+        self.assertFalse(write_result['delete_performed'])
 
 if __name__ == '__main__':
     unittest.main()
