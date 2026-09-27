@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = [
     '.gitignore','runpod/api_server.py','runpod/preflight.py','runpod/clone_v2_readiness.py','runpod/start_api.sh','runpod/requirements-api.txt',
-    'worker/run_clone_v2_test.py','worker/lipsync_musetalk.py','worker/validate_lipsync_render_provenance.py','worker/materialize_clone_runtime_from_s3.py',
+    'runpod/runtime_attestation.py','worker/run_clone_v2_test.py','worker/lipsync_musetalk.py','worker/validate_lipsync_render_provenance.py','worker/materialize_clone_runtime_from_s3.py',
     'worker/clone_job_artifact_store.py','worker/clone_job_state_store.py','worker/migrate_clone_storage.py','worker/storage_backend.py','worker/validate_repo_security_baseline.py',
     'worker/evaluate_clone_release.py','worker/evaluate_identity_view_results.py','worker/compare_clone_challenger.py','worker/validate_clone_promotion_bundle.py',
     'worker/validate_clone_duration_progression.py','worker/validate_clone_v2_temporal_output.py','worker/verify_clone_memory_chain.py',
