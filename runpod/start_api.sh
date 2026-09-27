@@ -10,4 +10,5 @@ mkdir -p "$AI_TWIN_STORAGE" "$AI_TWIN_OUTPUT"
 
 python -m pip install -r "$AI_TWIN_ROOT/runpod/requirements-api.txt"
 python "$AI_TWIN_ROOT/runpod/connection_readiness.py" --require-runtime-env
+python "$AI_TWIN_ROOT/runpod/runtime_attestation.py" --require-drive-free
 exec uvicorn runpod.api_server:app --host 0.0.0.0 --port "${PORT:-8000}" --app-dir "$AI_TWIN_ROOT"
