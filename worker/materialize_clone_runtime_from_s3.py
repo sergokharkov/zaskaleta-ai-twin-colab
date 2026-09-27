@@ -21,6 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from worker.clone_isolation import assert_clone_s3_scope
+
 CONFIG = ROOT / 'content' / 'storage_config.json'
 CHUNK_SIZE = 16 * 1024 * 1024
 
@@ -151,6 +156,7 @@ def main() -> int:
     if not isinstance(manifest_key, str) or not manifest_key:
         raise SystemExit('migration_manifest_key is not configured')
 
+    assert_clone_s3_scope(bucket, manifest_key)
     client = s3_client(cfg)
     manifest_response = client.get_object(Bucket=bucket, Key=manifest_key)
     manifest_bytes = manifest_response['Body'].read()
@@ -196,6 +202,7 @@ def main() -> int:
             try:
                 with tempfile.NamedTemporaryFile(prefix='clone-runtime-cipher-', delete=False) as tf:
                     tmp_cipher = Path(tf.name)
+                assert_clone_s3_scope(bucket, encrypted_key)
                 client.download_file(bucket, encrypted_key, str(tmp_cipher))
                 with tempfile.NamedTemporaryFile(prefix='clone-runtime-plain-', dir=target.parent, delete=False) as tf:
                     tmp_plain = Path(tf.name)
