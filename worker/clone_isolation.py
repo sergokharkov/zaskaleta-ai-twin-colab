@@ -9,7 +9,7 @@ class IsolationError(RuntimeError):
     pass
 
 _SCOPE_ENV = {
-    's3': 'AI_CLONE_S3_BUCKET',
+    's3': 'AI_TWIN_STORAGE_BUCKET',
     'drive': 'AI_CLONE_DRIVE_FOLDER_ID',
     'kaggle': 'AI_CLONE_KAGGLE_DATASET',
     'runpod': 'AI_CLONE_RUNPOD_NAMESPACE',
