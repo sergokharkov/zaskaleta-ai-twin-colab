@@ -1,5 +1,7 @@
+import json
 import os
 import pathlib
+import tempfile
 import unittest
 from unittest import mock
 
@@ -65,6 +67,44 @@ class RuntimeNegativeAccessTests(unittest.TestCase):
                 assert_clone_s3_scope('other-bucket', 'MASTER_CLONE/MEMORY/object.bin')
             with self.assertRaises(self.IsolationError):
                 assert_clone_s3_scope('canonical-bucket', 'OTHER_PROJECT/object.bin')
+
+
+class RuntimeAttestationTests(unittest.TestCase):
+    def test_static_attestation_classifies_provider_without_exposing_secrets(self):
+        from runpod.runtime_attestation import build_static_attestation
+
+        cfg = json.loads((ROOT / 'content/storage_config.json').read_text(encoding='utf-8'))
+        fake_env = {
+            'AI_TWIN_STORAGE_BUCKET': 'private-canonical-bucket',
+            'AI_TWIN_STORAGE_ENDPOINT': 'https://account.r2.cloudflarestorage.com',
+            'AI_TWIN_STORAGE_REGION': 'eu',
+            'AI_TWIN_STORAGE_ACCESS_KEY_ID': 'private-access-id',
+            'AI_TWIN_STORAGE_SECRET_ACCESS_KEY': 'private-secret-key',
+        }
+        with tempfile.TemporaryDirectory() as td:
+            report = build_static_attestation(
+                cfg,
+                fake_env,
+                mount_path=pathlib.Path(td),
+                revision='deadbeef',
+            )
+
+        self.assertEqual(report['provider'], 'cloudflare_r2')
+        self.assertEqual(report['canonical_namespace'], 'MASTER_CLONE/')
+        self.assertTrue(report['runtime_credentials_complete'])
+        self.assertTrue(report['drive_runtime_env_clear'])
+        self.assertFalse(report['runtime_credential_identity_verified'])
+        self.assertFalse(report['network_action_performed'])
+        self.assertFalse(report['secret_values_exposed'])
+
+        serialized = json.dumps(report, sort_keys=True)
+        for secret in (
+            fake_env['AI_TWIN_STORAGE_BUCKET'],
+            fake_env['AI_TWIN_STORAGE_ENDPOINT'],
+            fake_env['AI_TWIN_STORAGE_ACCESS_KEY_ID'],
+            fake_env['AI_TWIN_STORAGE_SECRET_ACCESS_KEY'],
+        ):
+            self.assertNotIn(secret, serialized)
 
 if __name__ == '__main__':
     unittest.main()
