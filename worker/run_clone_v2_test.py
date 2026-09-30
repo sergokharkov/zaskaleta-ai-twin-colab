@@ -198,6 +198,8 @@ def main():
     ap.add_argument('--text', default='Я говорю спокійно і природно. Кожна пауза має виглядати так, ніби слова справді вимовляю я. Без поспіху, без зайвих рухів, просто жива розмова.')
     ap.add_argument('--output-dir', default=None)
     ap.add_argument('--candidate-id', default='', help='Stable candidate identifier. Generated locally when omitted.')
+    ap.add_argument('--profile-path', default='', help='Optional candidate-specific clone profile. Default keeps legacy stable profile behavior.')
+    ap.add_argument('--asset-locator', default='', help='Optional candidate-specific private asset locator. Requires --profile-path.')
     args = ap.parse_args()
 
     candidate_id = normalize_candidate_id(args.candidate_id)
@@ -205,8 +207,12 @@ def main():
     worker = root / 'worker'
     content = root / 'content'
     python_bin = resolve_python()
-    profile_path = content / 'clone_reference_profile.json'
+    profile_path = Path(args.profile_path).resolve() if args.profile_path else content / 'clone_reference_profile.json'
+    if not profile_path.is_file():
+        raise SystemExit(f'Clone profile missing: {profile_path}')
     profile_doc = json.loads(profile_path.read_text(encoding='utf-8'))
+    if bool(args.asset_locator) != bool(args.profile_path):
+        raise SystemExit('--profile-path and --asset-locator must be supplied together for candidate-specific runtime isolation')
     talking_profile = json.loads((content / 'talking_profile_v2.json').read_text(encoding='utf-8'))
     temporal_policy_path = content / 'talking_temporal_guard_v1.json'
     temporal_policy = json.loads(temporal_policy_path.read_text(encoding='utf-8'))
@@ -220,13 +226,24 @@ def main():
     print(f'🧬 Candidate: {candidate_id}')
 
     asset_map = out / 'clone_assets_v2.json'
-    run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile_path, '--output', asset_map])
+    if args.asset_locator:
+        locator = Path(args.asset_locator).resolve()
+        if not locator.is_file():
+            raise SystemExit(f'Candidate asset locator missing: {locator}')
+        run([python_bin, locator, '--private-root', args.mydrive, '--profile', profile_path, '--output', asset_map])
+    else:
+        run([python_bin, worker / 'locate_clone_assets.py', '--mydrive', args.mydrive, '--profile', profile_path, '--output', asset_map])
     assets = json.loads(asset_map.read_text(encoding='utf-8'))
 
-    behavior = assets.get('primary_behavior')
-    if not behavior:
-        videos = assets.get('master_behavior_videos', [])
-        behavior = videos[0] if videos else None
+    if args.asset_locator:
+        roles = assets.get('roles') or {}
+        face_motion = roles.get('face_motion_primary') or []
+        behavior = face_motion[1] if len(face_motion) > 1 else (face_motion[0] if face_motion else None)
+    else:
+        behavior = assets.get('primary_behavior')
+        if not behavior:
+            videos = assets.get('master_behavior_videos', [])
+            behavior = videos[0] if videos else None
     if not behavior or not Path(behavior).is_file():
         raise SystemExit('No approved primary behavior video available for Clone v2 test')
 
@@ -243,12 +260,16 @@ def main():
     if not master_voice.is_file():
         raise SystemExit('Configured master voice is missing')
 
-    photos = [Path(p) for p in assets.get('master_photos', []) if Path(p).is_file()]
+    if args.asset_locator:
+        roles = assets.get('roles') or {}
+        photos = [Path(p) for p in (roles.get('identity_primary') or []) if Path(p).is_file()]
+    else:
+        photos = [Path(p) for p in assets.get('master_photos', []) if Path(p).is_file()]
     if not photos:
         raise SystemExit('No master photo available')
 
     expected_canonical = profile_doc.get('identity', {}).get('canonical_photo') or profile_doc.get('canonical_identity_photo')
-    located_canonical = assets.get('profile', {}).get('canonical_identity_photo')
+    located_canonical = Path(assets.get('canonical_identity_photo')).name if args.asset_locator and assets.get('canonical_identity_photo') else assets.get('profile', {}).get('canonical_identity_photo')
     canonical_name = expected_canonical or located_canonical
     if not canonical_name:
         raise SystemExit('Canonical identity photo is not explicitly configured; refusing fallback identity')
