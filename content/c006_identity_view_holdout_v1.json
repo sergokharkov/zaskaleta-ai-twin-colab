@@ -1,0 +1,77 @@
+{
+  "schema": "zaskaleta-c006-identity-view-holdout-v1",
+  "candidate_id": "MASTER_CLONE_CANDIDATE_006",
+  "purpose": "Mandatory multi-angle identity regression set for C006. View assignments are manually reviewed from source imagery; PASS is never inferred from assignment.",
+  "canonical_identity_photo": "MVIMG_20260929_094501.jpg",
+  "identity_primary_pool": [
+    "MVIMG_20260830_144457.jpg",
+    "MVIMG_20260830_144606.jpg",
+    "MVIMG_20260830_144834.jpg",
+    "MVIMG_20260830_144843.jpg",
+    "MVIMG_20260929_094501.jpg",
+    "MVIMG_20260929_094504.jpg",
+    "MVIMG_20260929_094509.jpg",
+    "MVIMG_20260929_095053.jpg",
+    "MVIMG_20260929_095058.jpg",
+    "MVIMG_20260929_095109.jpg",
+    "MVIMG_20260929_095114.jpg",
+    "MVIMG_20260929_095123.jpg"
+  ],
+  "required_views": [
+    "frontal",
+    "left_profile",
+    "right_profile",
+    "left_three_quarter",
+    "right_three_quarter"
+  ],
+  "view_orientation": "subject_relative",
+  "view_assignments": {
+    "frontal": {
+      "reference": "MVIMG_20260929_094501.jpg",
+      "review_status": "ASSIGNED_PENDING_IDENTITY_QA"
+    },
+    "left_profile": {
+      "reference": "MVIMG_20260929_095123.jpg",
+      "review_status": "ASSIGNED_PENDING_IDENTITY_QA"
+    },
+    "right_profile": {
+      "reference": "MVIMG_20260929_095058.jpg",
+      "review_status": "ASSIGNED_PENDING_IDENTITY_QA"
+    },
+    "left_three_quarter": {
+      "reference": "MVIMG_20260830_144834.jpg",
+      "review_status": "ASSIGNED_PENDING_IDENTITY_QA"
+    },
+    "right_three_quarter": {
+      "reference": "MVIMG_20260929_094504.jpg",
+      "review_status": "ASSIGNED_PENDING_IDENTITY_QA"
+    }
+  },
+  "rules": {
+    "manual_view_assignment_required": true,
+    "do_not_infer_view_from_filename": true,
+    "all_required_views_must_be_assigned_before_release": true,
+    "all_required_views_must_pass": true,
+    "identity_regression_tolerance": 0.0,
+    "manual_identity_override_allowed": false,
+    "stable_release_immutable": true,
+    "supporting_reference_must_come_from_c006_identity_primary": true,
+    "machine_similarity_gate_is_not_a_substitute_for_manual_likeness_review": true
+  },
+  "required_review_fields_per_view": [
+    "identity_similarity",
+    "identity_drift",
+    "face_structure_drift",
+    "age_regression",
+    "beard_regression",
+    "hairline_regression",
+    "jaw_regression",
+    "mouth_regression",
+    "asymmetry_loss",
+    "decision"
+  ],
+  "decision_values": ["PASS", "FAIL", "UNREVIEWED"],
+  "promotion_condition": "Every required view must PASS with zero manual identity regression, machine holdout must pass, and stable promotion must remain manual.",
+  "auto_promote": false,
+  "stable_release_modified": false
+}
