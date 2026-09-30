@@ -1,0 +1,110 @@
+{
+  "schema": "zaskaleta-c006-clone-reference-profile-v1",
+  "profile_name": "Zaskaleta Persistent AI Clone — C006 Canonical",
+  "candidate_id": "MASTER_CLONE_CANDIDATE_006",
+  "status": "FROZEN_PENDING_PRIVATE_QA",
+  "master_voice_filename": "Zaskaleta_AI_Voice_Master.mp3",
+  "canonical_identity_photo": "MVIMG_20260929_094501.jpg",
+  "identity_primary": [
+    "MVIMG_20260830_144457.jpg",
+    "MVIMG_20260830_144606.jpg",
+    "MVIMG_20260830_144834.jpg",
+    "MVIMG_20260830_144843.jpg",
+    "MVIMG_20260929_094501.jpg",
+    "MVIMG_20260929_094504.jpg",
+    "MVIMG_20260929_094509.jpg",
+    "MVIMG_20260929_095053.jpg",
+    "MVIMG_20260929_095058.jpg",
+    "MVIMG_20260929_095109.jpg",
+    "MVIMG_20260929_095114.jpg",
+    "MVIMG_20260929_095123.jpg"
+  ],
+  "identity_secondary": [
+    "image-1788277947699.jpg",
+    "image-1788277957517.jpg"
+  ],
+  "face_motion_primary": [
+    "VID_20260901_175254.mp4",
+    "VID_20260901_175350.mp4",
+    "VID_20260929_095146.mp4"
+  ],
+  "talking_behavior_only": [
+    "VID_20260901_184333.mp4",
+    "VID_20260901_184558.mp4",
+    "VID_20260901_184810.mp4",
+    "MASTER_BEHAVIOR_02.mp4"
+  ],
+  "body_movement_only": [
+    "VID_20260929_095157.mp4"
+  ],
+  "voice_source_backup": [
+    "54196_voice.mp3",
+    "54197_voice.mp3",
+    "54198_voice.mp3"
+  ],
+  "style_reference_only": [
+    "MASTER_BEHAVIOR_01.mp4"
+  ],
+  "pending_excluded": [
+    "VID_20260901_183436.mp4"
+  ],
+  "runtime_policy": {
+    "allowlist_only": true,
+    "unknown_source_policy": "DENY",
+    "use_identity_primary_for_identity": true,
+    "identity_secondary_evaluation_only": true,
+    "face_motion_may_support_talking": true,
+    "talking_behavior_must_not_replace_identity": true,
+    "body_movement_must_not_replace_identity": true,
+    "style_reference_must_not_replace_identity": true,
+    "pending_sources_ingestion_allowed": false,
+    "generated_media_ingestion_allowed": false,
+    "auto_discovery_grants_approval": false,
+    "auto_promote": false,
+    "stable_release_modified": false
+  },
+  "identity_strategy": "Use MVIMG_20260929_094501.jpg as the canonical generation identity anchor. Use the other 11 identity-primary photos for multi-angle identity preservation and evaluation. No behavior, body, style, generated, pending, C004, C005 or output artifact may replace the canonical identity anchor.",
+  "realism_lock": {
+    "identity": [
+      "preserve exact facial structure and natural asymmetry",
+      "preserve beard shape, density and color",
+      "preserve hairstyle, hairline and age",
+      "preserve eye shape, nose, lips, jaw and skin tone",
+      "no beautification, no rejuvenation, no face reshaping",
+      "same recognizable person in every frame and camera angle"
+    ],
+    "skin": [
+      "natural pores and skin texture",
+      "no plastic skin",
+      "no excessive smoothing",
+      "physically plausible highlights and shadows"
+    ],
+    "motion": [
+      "natural blinking",
+      "subtle breathing",
+      "micro head movement",
+      "realistic shoulder and neck motion",
+      "natural hand gestures",
+      "avoid robotic repetitive motion",
+      "avoid exaggerated head sway or synthetic camera motion"
+    ],
+    "speech": [
+      "visible speaker must match active audio",
+      "AI_CLONE always uses MASTER_VOICE",
+      "mouth closes naturally during pauses",
+      "jaw follows speech without rubber-mouth artifacts",
+      "eyes and micro-movements remain natural"
+    ],
+    "camera": [
+      "avoid extreme low-angle identity distortion",
+      "avoid ultra-wide facial distortion",
+      "behavior references transfer motion only, never camera geometry"
+    ]
+  },
+  "promotion": {
+    "manual_likeness_review_required": true,
+    "identity_regression_tolerance": 0.0,
+    "auto_promote": false,
+    "stable_release_modified": false
+  }
+}
