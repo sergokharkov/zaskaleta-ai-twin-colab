@@ -1,0 +1,120 @@
+name: C006 Runtime Readiness QA
+
+on:
+  push:
+    branches: [feat/c006-canonical-clone]
+    paths:
+      - 'content/c006_reference_manifest_v1.json'
+      - 'content/c006_clone_reference_profile_v1.json'
+      - 'content/c006_identity_view_holdout_v1.json'
+      - 'worker/validate_c006_reference_manifest.py'
+      - 'worker/c006_private_cpu_qa.py'
+      - 'worker/c006_identity_holdout_qa.py'
+      - 'worker/locate_c006_assets.py'
+      - 'worker/run_clone_v2_test.py'
+      - 'kaggle/autopilot_kernel_c006.py'
+      - 'kaggle/verified_c006_entry.py'
+      - '.github/workflows/c006-runtime-readiness-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c006-runtime-readiness-qa
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile C006 runtime
+        run: |
+          set -euo pipefail
+          python -m py_compile             worker/validate_c006_reference_manifest.py             worker/c006_private_cpu_qa.py             worker/c006_identity_holdout_qa.py             worker/locate_c006_assets.py             worker/run_clone_v2_test.py             kaggle/autopilot_kernel_c006.py             kaggle/verified_c006_entry.py
+
+      - name: Validate manifest and runtime contracts
+        run: |
+          set -euo pipefail
+          python worker/validate_c006_reference_manifest.py             --manifest content/c006_reference_manifest_v1.json
+
+          python - <<'PY'
+          import ast, json
+          from pathlib import Path
+
+          candidate='MASTER_CLONE_CANDIDATE_006'
+
+          profile=json.load(open('content/c006_clone_reference_profile_v1.json'))
+          assert profile['schema']=='zaskaleta-c006-clone-reference-profile-v1'
+          assert profile['candidate_id']==candidate
+          assert profile['canonical_identity_photo']=='MVIMG_20260929_094501.jpg'
+          assert len(profile['identity_primary'])==12
+          assert len(set(profile['identity_primary']))==12
+          assert profile['canonical_identity_photo'] in profile['identity_primary']
+          assert profile['pending_excluded']==['VID_20260901_183436.mp4']
+          p=profile['runtime_policy']
+          assert p['allowlist_only'] is True
+          assert p['unknown_source_policy']=='DENY'
+          assert p['pending_sources_ingestion_allowed'] is False
+          assert p['generated_media_ingestion_allowed'] is False
+          assert p['auto_discovery_grants_approval'] is False
+          assert p['auto_promote'] is False
+          assert p['stable_release_modified'] is False
+          assert profile['promotion']['identity_regression_tolerance']==0.0
+          assert profile['promotion']['manual_likeness_review_required'] is True
+
+          talking=json.load(open('content/talking_profile_v2.json'))
+          assert talking['test_gate']['range_seconds']==[8,15]
+
+          kernel=Path('kaggle/autopilot_kernel_c006.py').read_text()
+          entry=Path('kaggle/verified_c006_entry.py').read_text()
+          runner=Path('worker/run_clone_v2_test.py').read_text()
+          locator=Path('worker/locate_c006_assets.py').read_text()
+
+          for path in [
+              'kaggle/autopilot_kernel_c006.py',
+              'kaggle/verified_c006_entry.py',
+              'worker/run_clone_v2_test.py',
+              'worker/locate_c006_assets.py',
+          ]:
+              ast.parse(Path(path).read_text())
+
+          assert candidate in kernel and candidate in entry and candidate in locator
+          assert 'MVIMG_20260929_094501.jpg' in kernel
+          assert 'VID_20260901_175350.mp4' in kernel
+          assert '--profile-path' in runner and '--asset-locator' in runner
+          assert 'pending_sources_ingestion_allowed' in locator
+          assert 'auto_discovery_grants_approval' in locator
+          assert 'C006_RENDER_READY_FOR_MANUAL_REVIEW' in kernel
+          assert 'PENDING_MANUAL_REVIEW' in kernel
+          assert 'promotion_allowed=False' in kernel
+          assert 'auto_promote' in entry
+          assert 'stable_release_modified' in entry
+          print('C006_RUNTIME_READINESS_PASS')
+          PY
+
+      - name: Assert stable legacy defaults remain present
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('worker/run_clone_v2_test.py').read_text()
+          assert "content / 'clone_reference_profile.json'" in s
+          assert "worker / 'locate_clone_assets.py'" in s
+          print('LEGACY_DEFAULT_RUNTIME_PATH_PRESERVED')
+          PY
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'Static readiness only; no private media loaded.'
+          echo 'No GPU job launched.'
+          echo 'Stable release unchanged.'
+          echo 'Manual likeness review remains mandatory.'
