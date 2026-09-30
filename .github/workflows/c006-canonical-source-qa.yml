@@ -1,0 +1,108 @@
+name: C006 Canonical Source Contract QA
+
+on:
+  push:
+    branches: [feat/c006-canonical-clone]
+    paths:
+      - 'content/c006_reference_manifest_v1.json'
+      - 'content/c006_identity_view_holdout_v1.json'
+      - 'worker/validate_c006_reference_manifest.py'
+      - 'worker/c006_private_cpu_qa.py'
+      - '.github/workflows/c006-canonical-source-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c006-canonical-source-qa
+  cancel-in-progress: true
+
+jobs:
+  contract-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile C006 validators
+        run: |
+          set -euo pipefail
+          python -m py_compile worker/validate_c006_reference_manifest.py
+          python -m py_compile worker/c006_private_cpu_qa.py
+
+      - name: Validate canonical public-safe manifest
+        run: |
+          set -euo pipefail
+          mkdir -p .c006-safe
+          python worker/validate_c006_reference_manifest.py             --manifest content/c006_reference_manifest_v1.json             --output .c006-safe/C006_MANIFEST_QA_SAFE.json
+          python - <<'PY'
+          import json
+          d=json.load(open('.c006-safe/C006_MANIFEST_QA_SAFE.json'))
+          assert d['decision']=='C006_REFERENCE_MANIFEST_VALID'
+          assert d['registered_identity_primary']==12
+          assert d['pending_ingestion_allowed'] is False
+          assert d['gpu_launch_allowed'] is False
+          assert d['auto_promote'] is False
+          assert d['stable_release_modified'] is False
+          print('C006_CANONICAL_MANIFEST_PASS')
+          PY
+
+      - name: Assert privacy firewall fails closed
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          p='content/c006_reference_manifest_v1.json'
+          d=json.load(open(p))
+          d['private_reference_set']['identity_primary'][0]['drive_id']='SHOULD_NEVER_BE_PUBLIC'
+          d['privacy']['drive_ids_in_git']=True
+          open('.c006-safe/should_fail.json','w').write(json.dumps(d))
+          PY
+          if python worker/validate_c006_reference_manifest.py --manifest .c006-safe/should_fail.json; then
+            echo 'ERROR: privacy mutation unexpectedly passed'
+            exit 31
+          fi
+          echo 'C006_PRIVACY_FIREWALL_FAIL_CLOSED_PASS'
+
+      - name: Validate holdout assignment contract
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          d=json.load(open('content/c006_identity_view_holdout_v1.json'))
+          assert d['schema']=='zaskaleta-c006-identity-view-holdout-v1'
+          assert d['candidate_id']=='MASTER_CLONE_CANDIDATE_006'
+          required=d['required_views']
+          assert required==['frontal','left_profile','right_profile','left_three_quarter','right_three_quarter']
+          assignments=d['view_assignments']
+          assert set(assignments)==set(required)
+          pool=set(d['identity_primary_pool'])
+          for view in required:
+              a=assignments[view]
+              assert a['reference'] in pool
+              assert a['review_status']=='ASSIGNED_PENDING_IDENTITY_QA'
+          assert d['rules']['identity_regression_tolerance']==0.0
+          assert d['rules']['manual_identity_override_allowed'] is False
+          assert d['auto_promote'] is False
+          assert d['stable_release_modified'] is False
+          print('C006_HOLDOUT_ASSIGNMENT_CONTRACT_PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c006-contract-qa-${{ github.run_id }}
+          path: .c006-safe/C006_MANIFEST_QA_SAFE.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Safety summary
+        if: always()
+        run: |
+          echo 'No raw media, Drive IDs, private hashes, embeddings, or secret values are exported.'
+          echo 'GPU remains blocked.'
+          echo 'Stable release remains unchanged.'
