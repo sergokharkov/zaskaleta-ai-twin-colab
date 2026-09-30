@@ -1,0 +1,126 @@
+{
+  "schema": "zaskaleta-c006-reference-manifest-v1",
+  "candidate_id": "MASTER_CLONE_CANDIDATE_006",
+  "status": "CANONICAL_SOURCE_FROZEN_PENDING_PRIVATE_QA",
+  "created_date": "2026-09-30",
+  "training_policy": "ALLOWLIST_ONLY",
+  "default_policy": "DENY",
+  "comparison_baseline": {
+    "candidate": "C003",
+    "role": "historical_comparison_only",
+    "stable_release_modified": false
+  },
+  "previous_challenger": {
+    "candidate": "C005",
+    "role": "comparison_only",
+    "may_become_identity_source": false,
+    "stable_release_modified": false
+  },
+  "excluded_predecessor": {
+    "candidate": "C004",
+    "status": "EXCLUDED_FROM_C006_REFERENCE_USE"
+  },
+  "private_reference_set": {
+    "identity_primary": [
+      {"asset_alias":"C006_IDENTITY_PRIMARY_01","filename":"MVIMG_20260830_144457.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_02","filename":"MVIMG_20260830_144606.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_03","filename":"MVIMG_20260830_144834.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_04","filename":"MVIMG_20260830_144843.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_05","filename":"MVIMG_20260929_094501.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_06","filename":"MVIMG_20260929_094504.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_07","filename":"MVIMG_20260929_094509.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_08","filename":"MVIMG_20260929_095053.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_09","filename":"MVIMG_20260929_095058.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_10","filename":"MVIMG_20260929_095109.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_11","filename":"MVIMG_20260929_095114.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_PRIMARY_12","filename":"MVIMG_20260929_095123.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "identity_secondary": [
+      {"asset_alias":"C006_IDENTITY_SECONDARY_01","filename":"image-1788277947699.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_IDENTITY_SECONDARY_02","filename":"image-1788277957517.jpg","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "face_motion_primary": [
+      {"asset_alias":"C006_FACE_MOTION_01","filename":"VID_20260901_175254.mp4","duration_seconds":15.996444,"resolution":"1920x1080","video_codec":"hevc","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_FACE_MOTION_02","filename":"VID_20260901_175350.mp4","duration_seconds":36.525378,"resolution":"1920x1080","video_codec":"hevc","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_FACE_MOTION_03","filename":"VID_20260929_095146.mp4","duration_seconds":3.084189,"resolution":"1080x1440","video_codec":"hevc","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "talking_behavior": [
+      {"asset_alias":"C006_BEHAVIOR_01","filename":"VID_20260901_184333.mp4","duration_seconds":131.219456,"role":"behavior_only","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_BEHAVIOR_02","filename":"VID_20260901_184558.mp4","duration_seconds":119.134789,"role":"behavior_only","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_BEHAVIOR_03","filename":"VID_20260901_184810.mp4","duration_seconds":86.286156,"role":"behavior_only","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"},
+      {"asset_alias":"C006_BEHAVIOR_04","filename":"MASTER_BEHAVIOR_02.mp4","duration_seconds":6.692389,"role":"behavior_only","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "body_movement": [
+      {"asset_alias":"C006_BODY_01","filename":"VID_20260929_095157.mp4","duration_seconds":18.770078,"role":"body_only","storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "voice_primary": [
+      {"asset_alias":"C006_VOICE_PRIMARY","filename":"Zaskaleta_AI_Voice_Master.mp3","duration_seconds":336.48,"storage":"PRIVATE_ONLY","approval":"FROZEN_PENDING_PRIVATE_QA"}
+    ],
+    "voice_source_backup": [
+      {"asset_alias":"C006_VOICE_SOURCE_01","filename":"54196_voice.mp3","duration_seconds":131.186939,"storage":"PRIVATE_ONLY","approval":"SOURCE_BACKUP"},
+      {"asset_alias":"C006_VOICE_SOURCE_02","filename":"54197_voice.mp3","duration_seconds":119.118367,"storage":"PRIVATE_ONLY","approval":"SOURCE_BACKUP"},
+      {"asset_alias":"C006_VOICE_SOURCE_03","filename":"54198_voice.mp3","duration_seconds":86.256327,"storage":"PRIVATE_ONLY","approval":"SOURCE_BACKUP"}
+    ],
+    "style_reference_only": [
+      {"asset_alias":"C006_STYLE_01","filename":"MASTER_BEHAVIOR_01.mp4","role":"style_only","storage":"PRIVATE_ONLY","approval":"STYLE_ONLY"}
+    ],
+    "pending_review": [
+      {"asset_alias":"C006_PENDING_01","filename":"VID_20260901_183436.mp4","reason":"source exceeds current connector raw-download limit and remains visually unverified","approval":"PENDING","ingestion_allowed":false}
+    ]
+  },
+  "hard_exclusions": [
+    "all AI-generated or face-swapped identity media",
+    "all ZASKALETA final/TikTok/Series renders",
+    "dated generated cinematic videos from 2026-09-24 through 2026-09-29",
+    "episode outputs and scene renders",
+    "C004/C005 derived outputs as identity truth",
+    "group/family photos as primary identity anchors",
+    "unknown-provenance media"
+  ],
+  "privacy": {
+    "raw_biometric_media_in_git": false,
+    "private_biometric_hashes_in_git": false,
+    "drive_ids_in_git": false,
+    "encryption_keys_in_git": false,
+    "public_manifest_contains_only_sanitized_aliases_and_non_biometric_technical_metadata": true
+  },
+  "identity_preservation_policy": {
+    "preserve": [
+      "natural facial structure",
+      "natural asymmetry",
+      "eye shape and spacing",
+      "nose geometry",
+      "mouth and jaw geometry",
+      "beard shape density and color",
+      "hairline and hairstyle",
+      "age",
+      "natural skin texture and tone"
+    ],
+    "forbid": [
+      "beautification",
+      "rejuvenation",
+      "face reshaping",
+      "lookalike substitution",
+      "over-aggressive sharpening",
+      "over-aggressive contrast that changes perceived identity",
+      "automatic promotion of generated output into identity references"
+    ]
+  },
+  "c006_gates": {
+    "private_integrity_registry_created": true,
+    "private_asset_staging_verified": false,
+    "source_integrity_verified": false,
+    "two_independent_cpu_qa_passes": false,
+    "multi_photo_identity_consistency_passed": false,
+    "face_motion_identity_holdout_passed": false,
+    "behavior_role_isolation_passed": false,
+    "voice_lineage_passed": false,
+    "duplicate_gate_passed": false,
+    "manual_likeness_review_passed": false,
+    "gpu_launch_allowed": false,
+    "manual_promotion_required": true,
+    "auto_promote": false,
+    "stable_release_modified": false
+  },
+  "next_action": "Validate this sanitized manifest, stage only the private allowlisted C006 source pack, run exact-byte source integrity plus two independent CPU QA passes and multi-photo/face-motion identity holdout, then consider an 8-15 second GPU challenger render without modifying any stable release."
+}
